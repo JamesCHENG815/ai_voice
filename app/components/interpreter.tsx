@@ -383,7 +383,6 @@ export default function Interpreter() {
       setInterim(itr)
     }
     r.onerror = (e: any) => {
-      console.error('[STT] error:', e.error)
       if (e.error === 'aborted') return
       if (e.error === 'no-speech') {
         // no-speech is normal silence; just restart — don't surface as fatal
