@@ -1,7 +1,5 @@
 import Groq from 'groq-sdk'
 
-const client = new Groq({ apiKey: process.env.GROQ_API_KEY })
-
 export interface ContextSegment {
   index: number
   english: string
@@ -34,6 +32,7 @@ Rules:
 }
 
 export async function POST(request: Request) {
+  const client = new Groq({ apiKey: process.env.GROQ_API_KEY })
   const { text, context, sourceLang = 'en-US', targetLang = 'zh-CN' } = (await request.json()) as {
     text: string
     context: ContextSegment[]
