@@ -198,23 +198,24 @@ function GradientMicIcon({ size = 44 }: { size?: number }) {
 
 // ── Mic visualizer ────────────────────────────────────────────────────────
 function MicVisualizer({
-  level, isRecording, isConnecting, status, onClick,
+  level, isRecording, isConnecting, status, onClick, containerSize = CONTAINER_SIZE,
 }: {
-  level: number; isRecording: boolean; isConnecting: boolean; status: Status; onClick: () => void
+  level: number; isRecording: boolean; isConnecting: boolean; status: Status; onClick: () => void; containerSize?: number
 }) {
   const isProcessing = status === 'processing'
   const accent   = isConnecting ? '99,102,241' : isProcessing ? '217,119,6'  : '37,99,235'
   const btnBg    = isConnecting ? 'linear-gradient(145deg,#4f46e5,#7c3aed)'
                  : isProcessing ? '#d97706' : 'linear-gradient(145deg,#3b82f6,#6d28d9)'
+  const scale    = containerSize / CONTAINER_SIZE
   const micSize  = isRecording ? MIC_SIZE_ACTIVE : MIC_SIZE_IDLE
 
   return (
-    <div style={{ width: CONTAINER_SIZE, height: CONTAINER_SIZE, position: 'relative',
+    <div style={{ width: containerSize, height: containerSize, position: 'relative',
       display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
 
       {/* Idle breathing ring */}
       <div className="animate-idle-pulse" style={{
-        position: 'absolute', width: 170, height: 170, borderRadius: '50%',
+        position: 'absolute', width: Math.round(170 * scale), height: Math.round(170 * scale), borderRadius: '50%',
         border: '1.5px solid rgba(99,102,241,0.45)',
         background: 'rgba(99,102,241,0.07)',
         opacity: isRecording ? 0 : 1,
@@ -224,7 +225,7 @@ function MicVisualizer({
 
       {/* Audio ring 3 */}
       <div style={{
-        position: 'absolute', width: 190, height: 190, borderRadius: '50%',
+        position: 'absolute', width: Math.round(190 * scale), height: Math.round(190 * scale), borderRadius: '50%',
         background: `rgba(${accent},${isRecording ? 0.03 + level * 0.05 : 0})`,
         border: `1.5px solid rgba(${accent},${isRecording ? 0.07 + level * 0.14 : 0})`,
         transform: `scale(${isRecording ? 1 + level * 0.15 : 0.6})`,
@@ -234,7 +235,7 @@ function MicVisualizer({
 
       {/* Audio ring 2 */}
       <div style={{
-        position: 'absolute', width: 140, height: 140, borderRadius: '50%',
+        position: 'absolute', width: Math.round(140 * scale), height: Math.round(140 * scale), borderRadius: '50%',
         background: `rgba(${accent},${isRecording ? 0.06 + level * 0.10 : 0})`,
         border: `1.5px solid rgba(${accent},${isRecording ? 0.12 + level * 0.24 : 0})`,
         transform: `scale(${isRecording ? 1 + level * 0.11 : 0.6})`,
@@ -244,7 +245,7 @@ function MicVisualizer({
 
       {/* Audio ring 1 */}
       <div style={{
-        position: 'absolute', width: 100, height: 100, borderRadius: '50%',
+        position: 'absolute', width: Math.round(100 * scale), height: Math.round(100 * scale), borderRadius: '50%',
         background: `rgba(${accent},${isRecording ? 0.09 + level * 0.14 : 0})`,
         border: `1.5px solid rgba(${accent},${isRecording ? 0.20 + level * 0.34 : 0})`,
         transform: `scale(${isRecording ? 1 + level * 0.08 : 0.6})`,
@@ -256,7 +257,7 @@ function MicVisualizer({
       <button onClick={onClick} title={isConnecting ? '正在连接…' : isRecording ? '点击停止' : '点击开始'}
         style={{
           position: 'relative', zIndex: 10,
-          width: micSize, height: micSize, borderRadius: '50%',
+          width: Math.round(micSize * scale), height: Math.round(micSize * scale), borderRadius: '50%',
           background: isConnecting || isRecording
             ? btnBg
             : 'linear-gradient(145deg, rgba(37,99,235,0.18) 0%, rgba(109,40,217,0.14) 100%)',
@@ -274,7 +275,7 @@ function MicVisualizer({
             'background 350ms', 'box-shadow 100ms ease-out', 'transform 80ms ease-out',
           ].join(', '),
         }}>
-        {isRecording ? <MicIcon size={26} color="#ffffff"/> : <GradientMicIcon size={46}/>}
+        {isRecording ? <MicIcon size={Math.round(26 * scale)} color="#ffffff"/> : <GradientMicIcon size={Math.round(46 * scale)}/>}
       </button>
     </div>
   )
@@ -285,6 +286,7 @@ export default function Interpreter() {
   const [mode, setMode]               = useState<Mode>('mic')
   const [sourceLang, setSourceLang]   = useState<LangCode>('en-US')
   const [targetLang, setTargetLang]   = useState<LangCode>('zh-CN')
+  const [isMobile, setIsMobile]       = useState(false)
   const [isOnPage, setIsOnPage]         = useState(false)
   const [isRecording, setIsRecording]   = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -304,7 +306,7 @@ export default function Interpreter() {
   const recordingRef = useRef(false)
   const bottomRef    = useRef<HTMLDivElement>(null)
   const ttsOnRef           = useRef(true)
-  const speakRef           = useRef<(text: string) => void>(() => {})
+  const speakRef           = useRef<(text: string, cancelFirst?: boolean) => void>(() => {})
   const sourceLangRef      = useRef<LangCode>('en-US')
   const targetLangRef      = useRef<LangCode>('zh-CN')
   const interimTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -314,6 +316,12 @@ export default function Interpreter() {
 
   useEffect(() => { segsRef.current = segments }, [segments])
   useEffect(() => { recordingRef.current = isRecording }, [isRecording])
+  useEffect(() => {
+    const check = () => setIsMobile(window.innerWidth < 640)
+    check()
+    window.addEventListener('resize', check)
+    return () => window.removeEventListener('resize', check)
+  }, [])
   useEffect(() => { ttsOnRef.current = ttsOn }, [ttsOn])
   useEffect(() => { sourceLangRef.current = sourceLang }, [sourceLang])
   useEffect(() => { targetLangRef.current = targetLang }, [targetLang])
@@ -572,9 +580,11 @@ export default function Interpreter() {
     idle: '', listening: '监听中…', processing: '翻译中…', error: errMsg,
   }
 
-  const half = CONTAINER_SIZE / 2
+  const micSize = isMobile ? 140 : CONTAINER_SIZE
+  const micGap  = isMobile ? 12  : CORNER_GAP
+  const half    = micSize / 2
   const micTransform = isRecording
-    ? `translate(calc(100vw - ${CONTAINER_SIZE + CORNER_GAP}px), calc(100vh - ${CONTAINER_SIZE + CORNER_GAP}px))`
+    ? `translate(calc(100vw - ${micSize + micGap}px), calc(100vh - ${micSize + micGap}px))`
     : `translate(calc(50vw - ${half}px), calc(50vh - ${half - 24}px))`
 
   // Shared header style
@@ -598,10 +608,10 @@ export default function Interpreter() {
             <span style={{ color: 'rgba(255,255,255,0.38)', fontSize: 12 }}>您忠实的 AI 同声传译助手</span>
           </header>
 
-          <main className="flex-1 flex flex-col items-center justify-center gap-8 px-4">
+          <main className="flex-1 flex flex-col items-center justify-center gap-6 px-4 py-6">
             <div className="text-center">
               <h1 className="font-bold mb-2 animate-gradient-shift" style={{
-                fontSize: 60, letterSpacing: '-0.04em', lineHeight: 1,
+                fontSize: 'clamp(36px, 12vw, 60px)', letterSpacing: '-0.04em', lineHeight: 1,
                 background: 'linear-gradient(135deg, #60a5fa, #a78bfa, #f472b6, #22d3ee, #60a5fa)',
                 backgroundSize: '300% 300%',
                 WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
@@ -612,21 +622,22 @@ export default function Interpreter() {
             </div>
 
             {/* Mode cards */}
-            <div className="flex gap-4">
+            <div className="flex gap-3 w-full" style={{ maxWidth: 360 }}>
               {(['mic', 'system'] as Mode[]).map(m => {
                 const sel = mode === m
                 return (
                   // Outer div = gradient "border"; inner div = card content
                   <div key={m}
-                    className={sel ? 'animate-gradient-shift' : ''}
+                    className={sel ? 'animate-gradient-shift flex-1' : 'flex-1'}
                     onClick={() => setMode(m)}
                     style={{
-                      width: 168, height: 148, borderRadius: 18,
+                      height: 130, borderRadius: 18,
                       padding: 1.5,
                       cursor: 'pointer',
-                      background: sel
+                      backgroundImage: sel
                         ? 'linear-gradient(135deg, #93c5fd, #ddd6fe, #f9a8d4, #67e8f9, #93c5fd)'
-                        : 'rgba(255,255,255,0.10)',
+                        : 'none',
+                      backgroundColor: sel ? 'transparent' : 'rgba(255,255,255,0.10)',
                       backgroundSize: '300% 300%',
                       boxShadow: sel
                         ? '0 0 20px rgba(196,181,253,0.70), 0 0 50px rgba(147,197,253,0.35), 0 0 90px rgba(99,102,241,0.20)'
@@ -698,9 +709,9 @@ export default function Interpreter() {
             </div>
 
             <button onClick={enterPage} disabled={!hasSR}
-              className="animate-gradient-shift flex items-center justify-center gap-2.5 font-semibold text-sm transition-shadow duration-150 disabled:opacity-40"
+              className="animate-gradient-shift flex items-center justify-center gap-2.5 font-semibold text-sm transition-shadow duration-150 disabled:opacity-40 w-full"
               style={{
-                width: 352, height: 48, borderRadius: 24,
+                maxWidth: 352, height: 48, borderRadius: 24,
                 background: 'linear-gradient(90deg, #93c5fd, #ddd6fe, #f9a8d4, #67e8f9, #93c5fd)',
                 backgroundSize: '300% 300%',
                 color: '#1e1b4b',
@@ -733,51 +744,74 @@ export default function Interpreter() {
       <AnimatedBackground />
       <div className="h-screen flex flex-col" style={{ position: 'relative', zIndex: 1 }}>
 
-        <header className="flex-none flex items-center justify-between px-6 py-3" style={headerStyle}>
-          <div className="flex items-center gap-3">
+        <header className="flex-none flex items-center justify-between px-3 py-2 sm:px-6 sm:py-3" style={headerStyle}>
+          <div className="flex items-center gap-2">
             <Logo size={18} />
-            <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, fontWeight: 300 }}>|</span>
-            <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>您忠实的 AI 同声传译助手</span>
-            <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 10, background: 'rgba(79,70,229,0.22)', color: '#a5b4fc', border: '1px solid rgba(129,140,248,0.25)' }}>
+            <span className="hidden sm:inline" style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, fontWeight: 300 }}>|</span>
+            <span className="hidden sm:inline" style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>您忠实的 AI 同声传译助手</span>
+            <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(79,70,229,0.22)', color: '#a5b4fc', border: '1px solid rgba(129,140,248,0.25)', whiteSpace: 'nowrap' }}>
               {LANGUAGES.find(l => l.code === sourceLang)?.label} → {LANGUAGES.find(l => l.code === targetLang)?.label}
             </span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-1.5 sm:gap-3">
             {status !== 'idle' && (
-              <span className="text-xs font-medium px-2.5 py-1 rounded-full" style={{
-                background: 'rgba(255,255,255,0.07)',
-                color: statusColor[status],
-                border: `1px solid ${statusColor[status]}40`,
-              }}>
-                {statusLabel[status]}
-              </span>
+              <>
+                {/* Desktop: full badge with label */}
+                <span className="hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full items-center gap-1" style={{
+                  background: 'rgba(255,255,255,0.07)',
+                  color: statusColor[status],
+                  border: `1px solid ${statusColor[status]}40`,
+                }}>
+                  {statusLabel[status]}
+                  <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: statusColor[status] }} />
+                </span>
+                {/* Mobile: dot only */}
+                <span className="sm:hidden inline-block w-2 h-2 rounded-full" style={{ background: statusColor[status] }} />
+              </>
             )}
+            {/* TTS toggle — icon only on mobile */}
             <button onClick={() => { setTtsOn(p => !p); window.speechSynthesis.cancel() }}
-              className="text-xs transition-colors px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+              className="text-xs transition-colors px-2 py-1.5 sm:px-3 rounded-lg flex items-center gap-1.5"
               style={{ color: ttsOn ? '#86efac' : 'rgba(255,255,255,0.30)', background: ttsOn ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.05)', border: `1px solid ${ttsOn ? 'rgba(134,239,172,0.30)' : 'rgba(255,255,255,0.08)'}` }}>
               {ttsOn ? (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
                 </svg>
               ) : (
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
                 </svg>
               )}
-              {ttsOn ? '朗读中' : '已静音'}
+              <span className="hidden sm:inline">{ttsOn ? '朗读中' : '已静音'}</span>
             </button>
             {segments.length > 0 && (
-              <button onClick={downloadPDF}
-                className="text-xs transition-colors px-3 py-1.5 rounded-lg"
-                style={{ color: 'rgba(165,180,252,0.70)', background: 'rgba(79,70,229,0.15)', border: '1px solid rgba(129,140,248,0.25)' }}
-                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#a5b4fc'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.30)' }}
-                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(165,180,252,0.70)'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(79,70,229,0.15)' }}>
-                导出 PDF
-              </button>
+              <>
+                {/* Desktop: text button */}
+                <button onClick={downloadPDF}
+                  className="hidden sm:block text-xs transition-colors px-3 py-1.5 rounded-lg"
+                  style={{ color: 'rgba(165,180,252,0.70)', background: 'rgba(79,70,229,0.15)', border: '1px solid rgba(129,140,248,0.25)' }}
+                  onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#a5b4fc'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.30)' }}
+                  onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(165,180,252,0.70)'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(79,70,229,0.15)' }}>
+                  导出 PDF
+                </button>
+                {/* Mobile: icon only */}
+                <button onClick={downloadPDF}
+                  className="sm:hidden flex items-center justify-center rounded-lg transition-colors"
+                  style={{ width: 32, height: 32, color: 'rgba(165,180,252,0.70)', background: 'rgba(79,70,229,0.15)', border: '1px solid rgba(129,140,248,0.25)' }}
+                  title="导出 PDF">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                    <polyline points="14 2 14 8 20 8"/>
+                    <line x1="9" y1="13" x2="15" y2="13"/>
+                    <line x1="9" y1="17" x2="15" y2="17"/>
+                    <polyline points="9 9 10 9"/>
+                  </svg>
+                </button>
+              </>
             )}
             {segments.length > 0 && (
               <button onClick={() => { setSegments([]); segsRef.current = [] }}
-                className="text-xs transition-colors px-3 py-1.5 rounded-lg"
+                className="hidden sm:block text-xs transition-colors px-3 py-1.5 rounded-lg"
                 style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.05)' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.75)' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.35)' }}>
@@ -785,7 +819,7 @@ export default function Interpreter() {
               </button>
             )}
             <button onClick={() => { stopRecording(); setIsOnPage(false); setSegments([]); segsRef.current = [] }}
-              className="text-xs transition-colors px-3 py-1.5 rounded-lg"
+              className="text-xs transition-colors px-2 py-1.5 sm:px-3 rounded-lg"
               style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.05)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.75)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.35)' }}>
@@ -803,7 +837,7 @@ export default function Interpreter() {
             transition: 'opacity 300ms ease-out',
             pointerEvents: 'none',
           }}>
-            <div style={{ width: CONTAINER_SIZE, height: CONTAINER_SIZE }} />
+            <div style={{ width: micSize, height: micSize }} />
             <div style={{ textAlign: 'center', maxWidth: 280, padding: '0 16px' }}>
               {isConnecting ? (
                 <p className="animate-pulse font-medium" style={{ fontSize: 14, color: '#a5b4fc', letterSpacing: '0.04em' }}>
@@ -830,15 +864,15 @@ export default function Interpreter() {
           <div className="h-full overflow-y-auto" style={{
             opacity: isRecording || segments.length > 0 ? 1 : 0,
             transition: 'opacity 400ms ease-out',
-            paddingBottom: `${CONTAINER_SIZE + CORNER_GAP + 24}px`,
-            paddingRight: `${CONTAINER_SIZE + CORNER_GAP + 24}px`,
+            paddingBottom: `${micSize + micGap + 24}px`,
+            paddingRight: isMobile ? '16px' : `${micSize + micGap + 24}px`,
           }}>
             {segments.length === 0 && !interim ? (
               <div className="h-full flex items-center justify-center">
                 <p style={{ color: 'rgba(255,255,255,0.18)', fontSize: 14 }}>说话后字幕将出现在这里…</p>
               </div>
             ) : (
-              <div className="max-w-2xl mx-auto px-6 py-6 flex flex-col gap-4">
+              <div className="max-w-2xl mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col gap-3 sm:gap-4">
 
                 {/* History segments */}
                 {history.map((seg, idx) => {
@@ -848,12 +882,12 @@ export default function Interpreter() {
                     <div key={seg.id} style={{ opacity, display: 'flex', flexDirection: 'column', gap: 6 }}>
                       {/* English bubble — transparent */}
                       <div style={{
-                        alignSelf: 'flex-start',
+                        alignSelf: isMobile ? 'stretch' : 'flex-start',
                         background: 'rgba(255,255,255,0.06)',
                         border: '1px solid rgba(255,255,255,0.11)',
                         borderRadius: '16px 16px 16px 4px',
                         padding: '7px 14px',
-                        maxWidth: '90%',
+                        maxWidth: isMobile ? '100%' : '90%',
                       }}>
                         <p className="font-mono line-clamp-2" style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
                           {seg.english}
@@ -862,15 +896,15 @@ export default function Interpreter() {
                       {/* Chinese bubble — blue-purple */}
                       {seg.chinese && (
                         <div style={{
-                          alignSelf: 'flex-start',
+                          alignSelf: isMobile ? 'stretch' : 'flex-start',
                           background: 'linear-gradient(135deg, rgba(79,70,229,0.40), rgba(37,99,235,0.28))',
                           border: '1px solid rgba(129,140,248,0.30)',
                           borderRadius: '4px 16px 16px 16px',
                           padding: '9px 16px',
-                          maxWidth: '90%',
+                          maxWidth: isMobile ? '100%' : '90%',
                           boxShadow: '0 2px 16px rgba(79,70,229,0.18)',
                         }}>
-                          <p style={{ fontSize: 17, color: '#e0e7ff', lineHeight: 1.5 }}>{seg.chinese}</p>
+                          <p style={{ fontSize: isMobile ? 15 : 17, color: '#e0e7ff', lineHeight: 1.5 }}>{seg.chinese}</p>
                         </div>
                       )}
                     </div>
@@ -950,13 +984,13 @@ export default function Interpreter() {
       {/* Floating mic */}
       <div style={{
         position: 'fixed', top: 0, left: 0, zIndex: 50,
-        width: CONTAINER_SIZE, height: CONTAINER_SIZE,
+        width: micSize, height: micSize,
         transform: micTransform,
         transition: 'transform 550ms cubic-bezier(0.4, 0, 0.2, 1)',
         pointerEvents: 'none',
       }}>
         <div style={{ width: '100%', height: '100%', pointerEvents: 'auto' }}>
-          <MicVisualizer level={audioLevel} isRecording={isRecording} isConnecting={isConnecting} status={status} onClick={toggleMic} />
+          <MicVisualizer level={audioLevel} isRecording={isRecording} isConnecting={isConnecting} status={status} onClick={toggleMic} containerSize={micSize} />
         </div>
       </div>
 
