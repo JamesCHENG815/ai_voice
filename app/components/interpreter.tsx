@@ -293,8 +293,8 @@ export default function Interpreter() {
         style={{ borderBottom: '1px solid rgba(255,255,255,0.06)', background: 'rgba(255,255,255,0.02)' }}
       >
         <LiveDot status={status} />
-        <span className="font-semibold text-sm text-white/90 tracking-tight">AI 同声传译</span>
-        <span className="text-xs text-white/25 hidden sm:block">英语 → 中文实时翻译</span>
+        <span className="font-semibold text-sm text-white/90 tracking-tight">聆译</span>
+        <span className="text-xs text-white/25 hidden sm:block">英语 → 中文 · 实时同声传译</span>
 
         <div className="ml-auto flex items-center gap-2">
           {/* Mode toggle */}
@@ -357,7 +357,8 @@ export default function Interpreter() {
               <line x1="8" y1="23" x2="16" y2="23"/>
             </svg>
             <div className="text-center text-sm leading-6">
-              <p>选择输入模式，点击「开始翻译」</p>
+              <p className="text-white/20 text-base font-medium">聆译</p>
+              <p className="text-white/12 mt-1">选择输入模式，点击「开始翻译」</p>
               <p className="text-white/10">支持 Chrome / Edge 浏览器</p>
             </div>
             {!hasSR && (

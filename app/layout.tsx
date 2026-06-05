@@ -13,8 +13,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "AI 同声传译助手",
-  description: "实时英译中同声传译 — 由 Claude AI 驱动",
+  title: "聆译 — AI 同声传译助手",
+  description: "实时将英语音频翻译为中文字幕，由 Claude AI 驱动",
 };
 
 export default function RootLayout({
