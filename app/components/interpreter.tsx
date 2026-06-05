@@ -321,7 +321,7 @@ export default function Interpreter() {
   useEffect(() => { segsRef.current = segments }, [segments])
   useEffect(() => { recordingRef.current = isRecording }, [isRecording])
   useEffect(() => {
-    const check = () => setIsMobile(window.innerWidth < 640)
+    const check = () => setIsMobile(window.innerWidth < 768)
     check()
     window.addEventListener('resize', check)
     return () => window.removeEventListener('resize', check)
@@ -890,20 +890,20 @@ export default function Interpreter() {
       <AnimatedBackground />
       <div className="h-screen flex flex-col" style={{ position: 'relative', zIndex: 1 }}>
 
-        <header className="flex-none flex items-center justify-between px-3 py-2 sm:px-6 sm:py-3" style={headerStyle}>
+        <header className="flex-none flex items-center justify-between px-3 py-2 md:px-6 md:py-3" style={headerStyle}>
           <div className="flex items-center gap-2">
             <Logo size={18} />
-            <span className="hidden sm:inline" style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, fontWeight: 300 }}>|</span>
-            <span className="hidden sm:inline" style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>您忠实的 AI 同声传译助手</span>
+            <span className="hidden md:inline" style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, fontWeight: 300 }}>|</span>
+            <span className="hidden md:inline" style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>您忠实的 AI 同声传译助手</span>
             <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, background: 'rgba(79,70,229,0.22)', color: '#a5b4fc', border: '1px solid rgba(129,140,248,0.25)', whiteSpace: 'nowrap' }}>
               {LANGUAGES.find(l => l.code === sourceLang)?.label} → {LANGUAGES.find(l => l.code === targetLang)?.label}
             </span>
           </div>
-          <div className="flex items-center gap-1.5 sm:gap-3">
+          <div className="flex items-center gap-1.5 md:gap-3">
             {status !== 'idle' && (
               <>
                 {/* Desktop: full badge with label */}
-                <span className="hidden sm:inline-flex text-xs font-medium px-2.5 py-1 rounded-full items-center gap-1" style={{
+                <span className="hidden md:inline-flex text-xs font-medium px-2.5 py-1 rounded-full items-center gap-1" style={{
                   background: 'rgba(255,255,255,0.07)',
                   color: statusColor[status],
                   border: `1px solid ${statusColor[status]}40`,
@@ -912,12 +912,12 @@ export default function Interpreter() {
                   <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ background: statusColor[status] }} />
                 </span>
                 {/* Mobile: dot only */}
-                <span className="sm:hidden inline-block w-2 h-2 rounded-full" style={{ background: statusColor[status] }} />
+                <span className="md:hidden inline-block w-2 h-2 rounded-full" style={{ background: statusColor[status] }} />
               </>
             )}
             {/* TTS toggle — icon only on mobile */}
             <button onClick={() => { setTtsOn(p => !p); window.speechSynthesis.cancel() }}
-              className="text-xs transition-colors px-2 py-1.5 sm:px-3 rounded-lg flex items-center gap-1.5"
+              className="text-xs transition-colors px-2 py-1.5 md:px-3 rounded-lg flex items-center gap-1.5"
               style={{ color: ttsOn ? '#86efac' : 'rgba(255,255,255,0.30)', background: ttsOn ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.05)', border: `1px solid ${ttsOn ? 'rgba(134,239,172,0.30)' : 'rgba(255,255,255,0.08)'}` }}>
               {ttsOn ? (
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -928,13 +928,13 @@ export default function Interpreter() {
                   <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
                 </svg>
               )}
-              <span className="hidden sm:inline">{ttsOn ? '朗读中' : '已静音'}</span>
+              <span className="hidden md:inline">{ttsOn ? '朗读中' : '已静音'}</span>
             </button>
             {segments.length > 0 && (
               <>
                 {/* Desktop: text button */}
                 <button onClick={downloadPDF}
-                  className="hidden sm:block text-xs transition-colors px-3 py-1.5 rounded-lg"
+                  className="hidden md:block text-xs transition-colors px-3 py-1.5 rounded-lg"
                   style={{ color: 'rgba(165,180,252,0.70)', background: 'rgba(79,70,229,0.15)', border: '1px solid rgba(129,140,248,0.25)' }}
                   onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#a5b4fc'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.30)' }}
                   onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(165,180,252,0.70)'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(79,70,229,0.15)' }}>
@@ -942,7 +942,7 @@ export default function Interpreter() {
                 </button>
                 {/* Mobile: icon only */}
                 <button onClick={downloadPDF}
-                  className="sm:hidden flex items-center justify-center rounded-lg transition-colors"
+                  className="md:hidden flex items-center justify-center rounded-lg transition-colors"
                   style={{ width: 32, height: 32, color: 'rgba(165,180,252,0.70)', background: 'rgba(79,70,229,0.15)', border: '1px solid rgba(129,140,248,0.25)' }}
                   title="导出 PDF">
                   <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -957,7 +957,7 @@ export default function Interpreter() {
             )}
             {segments.length > 0 && (
               <button onClick={() => { setSegments([]); segsRef.current = [] }}
-                className="hidden sm:block text-xs transition-colors px-3 py-1.5 rounded-lg"
+                className="hidden md:block text-xs transition-colors px-3 py-1.5 rounded-lg"
                 style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.05)' }}
                 onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.75)' }}
                 onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.35)' }}>
@@ -965,7 +965,7 @@ export default function Interpreter() {
               </button>
             )}
             <button onClick={() => { stopRecording(); setIsOnPage(false); setSegments([]); segsRef.current = [] }}
-              className="text-xs transition-colors px-2 py-1.5 sm:px-3 rounded-lg"
+              className="text-xs transition-colors px-2 py-1.5 md:px-3 rounded-lg"
               style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.05)' }}
               onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.75)' }}
               onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.35)' }}>
@@ -1018,7 +1018,7 @@ export default function Interpreter() {
                 <p style={{ color: 'rgba(255,255,255,0.18)', fontSize: 14 }}>说话后字幕将出现在这里…</p>
               </div>
             ) : (
-              <div className="max-w-2xl mx-auto px-3 sm:px-6 py-4 sm:py-6 flex flex-col gap-3 sm:gap-4">
+              <div className="max-w-2xl mx-auto px-3 md:px-6 py-4 md:py-6 flex flex-col gap-3 md:gap-4">
 
                 {/* History segments */}
                 {history.map((seg, idx) => {
