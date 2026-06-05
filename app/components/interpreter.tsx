@@ -298,10 +298,14 @@ export default function Interpreter() {
   const [hasSR, setHasSR]             = useState(true)
   const [ttsOn, setTtsOn]             = useState(true)
 
-  const recogRef     = useRef<any>(null)
-  const audioCtxRef  = useRef<AudioContext | null>(null)
-  const sysStreamRef = useRef<MediaStream | null>(null)
-  const rafRef       = useRef<number>(0)
+  const recogRef          = useRef<any>(null)
+  const audioCtxRef       = useRef<AudioContext | null>(null)
+  const analyserRef       = useRef<AnalyserNode | null>(null)
+  const sysStreamRef      = useRef<MediaStream | null>(null)
+  const whisperStreamRef  = useRef<MediaStream | null>(null)
+  const mediaRecorderRef  = useRef<MediaRecorder | null>(null)
+  const whisperActiveRef  = useRef(false)
+  const rafRef            = useRef<number>(0)
   const segsRef      = useRef<Segment[]>([])
   const recordingRef = useRef(false)
   const bottomRef    = useRef<HTMLDivElement>(null)
@@ -345,6 +349,7 @@ export default function Interpreter() {
     analyser.fftSize = 128; analyser.smoothingTimeConstant = 0.8
     ctx.createMediaStreamSource(stream).connect(analyser)
     audioCtxRef.current = ctx
+    analyserRef.current = analyser
     const data = new Uint8Array(analyser.frequencyBinCount)
     const step = Math.floor(data.length / BAR_COUNT)
     const tick = () => {
@@ -358,6 +363,7 @@ export default function Interpreter() {
   function stopAudio() {
     cancelAnimationFrame(rafRef.current)
     audioCtxRef.current?.close(); audioCtxRef.current = null
+    analyserRef.current = null
     setBars(new Array(BAR_COUNT).fill(0))
   }
 
@@ -472,7 +478,140 @@ export default function Interpreter() {
 
   function enterPage() { setIsOnPage(true); setErrMsg(''); setStatus('idle') }
 
+  // ── Whisper-based STT (for mobile / browsers without working SpeechRecognition) ──
+
+  function getAudioLevel(): number {
+    const analyser = analyserRef.current
+    if (!analyser) return 0
+    const data = new Uint8Array(analyser.frequencyBinCount)
+    analyser.getByteFrequencyData(data)
+    return data.reduce((a, b) => a + b, 0) / data.length / 255
+  }
+
+  function captureSegment(stream: MediaStream) {
+    if (!whisperActiveRef.current) return
+
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : MediaRecorder.isTypeSupported('audio/mp4')
+      ? 'audio/mp4'
+      : ''
+
+    const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
+    mediaRecorderRef.current = mr
+    const chunks: Blob[] = []
+    const segStart = Date.now()
+
+    mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data) }
+
+    mr.onstop = async () => {
+      const elapsed = Date.now() - segStart
+      if (elapsed < 400 || chunks.length === 0) {
+        if (whisperActiveRef.current) captureSegment(stream)
+        return
+      }
+      const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' })
+      if (blob.size < 2000) {
+        if (whisperActiveRef.current) captureSegment(stream)
+        return
+      }
+
+      setStatus('processing')
+      setInterim('识别中…')
+      try {
+        const ext = (mr.mimeType || '').includes('mp4') ? 'm4a' : 'webm'
+        const fd = new FormData()
+        fd.append('audio', blob, `audio.${ext}`)
+        fd.append('language', sourceLangRef.current.slice(0, 2))
+        const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
+        const data = await res.json()
+        if (data.text?.trim().length > 1) {
+          setInterim('')
+          translate(data.text.trim())
+        } else {
+          setInterim('')
+          if (whisperActiveRef.current) setStatus('listening')
+        }
+      } catch {
+        setInterim('')
+        if (whisperActiveRef.current) setStatus('listening')
+      }
+
+      if (whisperActiveRef.current) captureSegment(stream)
+    }
+
+    mr.start(100)
+
+    // Silence detection — read directly from AnalyserNode
+    let silenceMs = 0
+    const SILENCE_THRESHOLD = 0.02
+    const SILENCE_REQUIRED = 1300
+    const MIN_DURATION = 500
+
+    const ticker = setInterval(() => {
+      if (!whisperActiveRef.current) {
+        clearInterval(ticker)
+        if (mr.state === 'recording') mr.stop()
+        return
+      }
+      const level = getAudioLevel()
+      const elapsed = Date.now() - segStart
+
+      if (level < SILENCE_THRESHOLD) {
+        silenceMs += 100
+        if (silenceMs >= SILENCE_REQUIRED && elapsed >= MIN_DURATION) {
+          clearInterval(ticker)
+          if (mr.state === 'recording') mr.stop()
+        }
+      } else {
+        silenceMs = 0
+      }
+
+      // Hard cap at 25s per segment
+      if (elapsed >= 25000) {
+        clearInterval(ticker)
+        if (mr.state === 'recording') mr.stop()
+      }
+    }, 100)
+  }
+
+  async function startWhisperRecording() {
+    setErrMsg(''); setIsConnecting(true)
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      whisperStreamRef.current = stream
+      startAudio(stream)
+      whisperActiveRef.current = true
+      recordingRef.current = true
+      setIsConnecting(false)
+      setIsRecording(true)
+      setStatus('listening')
+      captureSegment(stream)
+    } catch (err) {
+      setIsConnecting(false)
+      setStatus('error')
+      setErrMsg((err as Error).name === 'NotAllowedError'
+        ? '麦克风权限被拒绝，请在浏览器地址栏授权'
+        : '无法访问麦克风：' + (err as Error).message)
+    }
+  }
+
+  function stopWhisperRecording() {
+    whisperActiveRef.current = false
+    recordingRef.current = false
+    if (mediaRecorderRef.current?.state === 'recording') mediaRecorderRef.current.stop()
+    mediaRecorderRef.current = null
+    whisperStreamRef.current?.getTracks().forEach(t => t.stop())
+    whisperStreamRef.current = null
+    stopAudio()
+    window.speechSynthesis.cancel()
+    setIsRecording(false)
+    setStatus('idle')
+    setInterim('')
+  }
+
   async function startRecording() {
+    if (useWhisper && mode === 'mic') { startWhisperRecording(); return }
     setErrMsg(''); setIsConnecting(true)
     if (mode === 'mic') {
       try {
@@ -516,6 +655,7 @@ export default function Interpreter() {
   }
 
   function stopRecording() {
+    if (whisperActiveRef.current) { stopWhisperRecording(); return }
     setIsRecording(false); setStatus('idle'); setInterim('')
     if (interimTimerRef.current) { clearTimeout(interimTimerRef.current); interimTimerRef.current = null }
     lastSentTextRef.current = ''
@@ -580,6 +720,7 @@ export default function Interpreter() {
     idle: '', listening: '监听中…', processing: '翻译中…', error: errMsg,
   }
 
+  const useWhisper = isMobile || !hasSR
   const micSize = isMobile ? 140 : CONTAINER_SIZE
   const micGap  = isMobile ? 12  : CORNER_GAP
   const half    = micSize / 2
@@ -723,7 +864,12 @@ export default function Interpreter() {
               <PlayIcon /> 开始聆译
             </button>
 
-            {!hasSR && <p style={{ color: '#f87171', fontSize: 14 }}>请使用 Chrome 或 Edge 浏览器</p>}
+            {!hasSR && (
+              <p style={{ color: '#f87171', fontSize: 14, textAlign: 'center', maxWidth: 280 }}>
+                当前浏览器不支持语音识别。
+                iOS 请使用 Safari，Android 请使用 Chrome。
+              </p>
+            )}
             {mode === 'system' && (
               <p style={{ color: 'rgba(255,255,255,0.28)', fontSize: 12, textAlign: 'center', maxWidth: 280, marginTop: -16 }}>
                 启动后请在弹窗中勾选「共享系统音频」选项
