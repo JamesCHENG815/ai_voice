@@ -8,21 +8,37 @@ export interface ContextSegment {
   chinese: string
 }
 
-const SYSTEM_PROMPT = `You are a professional real-time simultaneous interpreter specializing in English to Chinese (Simplified) translation.
+const LANG_NAMES: Record<string, string> = {
+  'en-US': 'English',
+  'zh-CN': 'Chinese (Simplified)',
+  'ja-JP': 'Japanese',
+  'ko-KR': 'Korean',
+  'es-ES': 'Spanish',
+  'fr-FR': 'French',
+  'de-DE': 'German',
+}
+
+function buildSystemPrompt(sourceLang: string, targetLang: string): string {
+  const src = LANG_NAMES[sourceLang] ?? sourceLang
+  const tgt = LANG_NAMES[targetLang] ?? targetLang
+  return `You are a professional real-time simultaneous interpreter specializing in ${src} to ${tgt} translation.
 
 Rules:
-- Output ONLY the Chinese translation for the new segment — no explanations, no English text, no extra symbols
-- Use natural, colloquial Chinese suitable for spoken subtitles
+- Output ONLY the ${tgt} translation for the new segment — no explanations, no source language text, no extra symbols
+- Use natural, colloquial ${tgt} suitable for spoken subtitles
 - Keep proper nouns, names, and technical terms accurate
 - After your main translation (on new lines), if you detect errors in previous translations given this new context, output corrections in this exact format:
-  CORRECTION:N:corrected_chinese_text
+  CORRECTION:N:corrected_text
   (where N is the segment number shown in the context, one correction per line)
 - Do not add CORRECTION lines if previous translations were accurate`
+}
 
 export async function POST(request: Request) {
-  const { text, context } = (await request.json()) as {
+  const { text, context, sourceLang = 'en-US', targetLang = 'zh-CN' } = (await request.json()) as {
     text: string
     context: ContextSegment[]
+    sourceLang?: string
+    targetLang?: string
   }
 
   if (!text?.trim()) {
@@ -35,10 +51,7 @@ export async function POST(request: Request) {
   const contextStr =
     context.length > 0
       ? `Previous conversation segments (for context and error correction):\n${context
-          .map(
-            (c) =>
-              `${c.index + 1}. EN: "${c.english}"\n   ZH: "${c.chinese}"`
-          )
+          .map((c) => `${c.index + 1}. EN: "${c.english}"\n   Translation: "${c.chinese}"`)
           .join('\n')}\n\n`
       : ''
 
@@ -51,10 +64,10 @@ export async function POST(request: Request) {
           model: 'llama-3.3-70b-versatile',
           max_tokens: 1024,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
+            { role: 'system', content: buildSystemPrompt(sourceLang, targetLang) },
             {
               role: 'user',
-              content: `${contextStr}Translate this new English segment to Chinese:\n"${text}"`,
+              content: `${contextStr}Translate this new English segment:\n"${text}"`,
             },
           ],
           stream: true,
