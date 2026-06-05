@@ -176,13 +176,14 @@ function GradientMicIcon({ size = 44 }: { size?: number }) {
 
 // ── Mic visualizer ────────────────────────────────────────────────────────
 function MicVisualizer({
-  level, isRecording, status, onClick,
+  level, isRecording, isConnecting, status, onClick,
 }: {
-  level: number; isRecording: boolean; status: Status; onClick: () => void
+  level: number; isRecording: boolean; isConnecting: boolean; status: Status; onClick: () => void
 }) {
   const isProcessing = status === 'processing'
-  const accent   = isProcessing ? '217,119,6'  : '37,99,235'
-  const btnBg    = isProcessing ? '#d97706'    : 'linear-gradient(145deg,#3b82f6,#6d28d9)'
+  const accent   = isConnecting ? '99,102,241' : isProcessing ? '217,119,6'  : '37,99,235'
+  const btnBg    = isConnecting ? 'linear-gradient(145deg,#4f46e5,#7c3aed)'
+                 : isProcessing ? '#d97706' : 'linear-gradient(145deg,#3b82f6,#6d28d9)'
   const micSize  = isRecording ? MIC_SIZE_ACTIVE : MIC_SIZE_IDLE
 
   return (
@@ -230,11 +231,11 @@ function MicVisualizer({
       }} />
 
       {/* Button */}
-      <button onClick={onClick} title={isRecording ? '点击停止' : '点击开始'}
+      <button onClick={onClick} title={isConnecting ? '正在连接…' : isRecording ? '点击停止' : '点击开始'}
         style={{
           position: 'relative', zIndex: 10,
           width: micSize, height: micSize, borderRadius: '50%',
-          background: isRecording
+          background: isConnecting || isRecording
             ? btnBg
             : 'linear-gradient(145deg, rgba(37,99,235,0.18) 0%, rgba(109,40,217,0.14) 100%)',
           border: isRecording ? 'none' : '1.5px solid rgba(139,92,246,0.30)',
@@ -260,8 +261,9 @@ function MicVisualizer({
 // ── Main ──────────────────────────────────────────────────────────────────
 export default function Interpreter() {
   const [mode, setMode]               = useState<Mode>('mic')
-  const [isOnPage, setIsOnPage]       = useState(false)
-  const [isRecording, setIsRecording] = useState(false)
+  const [isOnPage, setIsOnPage]         = useState(false)
+  const [isRecording, setIsRecording]   = useState(false)
+  const [isConnecting, setIsConnecting] = useState(false)
   const [segments, setSegments]       = useState<Segment[]>([])
   const [interim, setInterim]         = useState('')
   const [status, setStatus]           = useState<Status>('idle')
@@ -339,10 +341,10 @@ export default function Interpreter() {
         const { done, value } = await reader.read(); if (done) break
         for (const line of dec.decode(value, { stream: true }).split('\n')) {
           if (!line.startsWith('data: ')) continue
-          try {
-            const msg = JSON.parse(line.slice(6))
-            if (msg.type === 'delta') { acc += msg.text; setSegments(p => p.map(s => s.id === segId ? { ...s, chinese: acc } : s)) }
-          } catch {}
+          let msg: any
+          try { msg = JSON.parse(line.slice(6)) } catch { continue }
+          if (msg.type === 'delta') { acc += msg.text; setSegments(p => p.map(s => s.id === segId ? { ...s, chinese: acc } : s)) }
+          else if (msg.type === 'error') { console.error('[translate] API error:', msg.message); throw new Error(msg.message) }
         }
       }
 
@@ -380,33 +382,73 @@ export default function Interpreter() {
       }
       setInterim(itr)
     }
-    r.onerror = (e: any) => { if (e.error === 'no-speech' || e.error === 'aborted') return; setStatus('error'); setErrMsg(`识别错误: ${e.error}`) }
-    r.onend = () => { if (recordingRef.current) { try { r.start() } catch {} } }
+    r.onerror = (e: any) => {
+      console.error('[STT] error:', e.error)
+      if (e.error === 'aborted') return
+      if (e.error === 'no-speech') {
+        // no-speech is normal silence; just restart — don't surface as fatal
+        return
+      }
+      if (e.error === 'network') {
+        setStatus('error')
+        setErrMsg('语音识别网络错误 — Chrome 的 STT 需要连接 Google 服务器，国内请开 VPN 后重试')
+        return
+      }
+      if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+        setStatus('error')
+        setErrMsg('浏览器拒绝了麦克风或语音识别权限，请检查地址栏权限设置')
+        return
+      }
+      setStatus('error'); setErrMsg(`语音识别错误: ${e.error}`)
+    }
+    r.onstart  = () => console.log('[STT] started')
+    r.onend    = () => {
+      console.log('[STT] ended, recordingRef=', recordingRef.current)
+      if (recordingRef.current) { try { r.start() } catch {} }
+    }
     return r
   }
 
   function enterPage() { setIsOnPage(true); setErrMsg(''); setStatus('idle') }
 
   async function startRecording() {
-    setErrMsg('')
+    setErrMsg(''); setIsConnecting(true)
     if (mode === 'mic') {
       try {
         const s = await navigator.mediaDevices.getUserMedia({ audio: true })
-        startAudio(s); const r = makeRecog(); if (r) { recogRef.current = r; r.start() }
-        setIsRecording(true); setStatus('listening')
-      } catch { setStatus('error'); setErrMsg('无法访问麦克风，请检查权限') }
+        startAudio(s)
+        const r = makeRecog()
+        if (!r) {
+          s.getTracks().forEach(t => t.stop()); stopAudio()
+          setIsConnecting(false); setStatus('error')
+          setErrMsg('浏览器不支持语音识别，请使用 Chrome 或 Edge')
+          return
+        }
+        recogRef.current = r; r.start()
+        setIsConnecting(false); setIsRecording(true); setStatus('listening')
+      } catch (err) {
+        setIsConnecting(false); setStatus('error')
+        setErrMsg((err as Error).name === 'NotAllowedError'
+          ? '麦克风权限被拒绝，请在浏览器地址栏旁点击锁形图标授权'
+          : '无法访问麦克风：' + (err as Error).message)
+      }
     } else {
       try {
         const s = await navigator.mediaDevices.getDisplayMedia({
           video: true, audio: { echoCancellation: false, noiseSuppression: false } as MediaTrackConstraints,
         })
         const aTracks = s.getAudioTracks()
-        if (!aTracks.length) { s.getTracks().forEach(t => t.stop()); setStatus('error'); setErrMsg('未检测到系统音频，请勾选「共享音频」'); return }
+        if (!aTracks.length) {
+          s.getTracks().forEach(t => t.stop())
+          setIsConnecting(false); setStatus('error'); setErrMsg('未检测到系统音频，请在弹窗中勾选「共享系统音频」'); return
+        }
         sysStreamRef.current = s; startAudio(new MediaStream(aTracks))
         aTracks.forEach(t => { t.onended = () => { if (recordingRef.current) stopRecording() } })
-        s.getVideoTracks().forEach(t => t.stop()); const r = makeRecog(); if (r) { recogRef.current = r; r.start() }
-        setIsRecording(true); setStatus('listening')
+        s.getVideoTracks().forEach(t => t.stop())
+        const r = makeRecog(); if (r) { recogRef.current = r; r.start() }
+        setIsConnecting(false); setIsRecording(true); setStatus('listening')
       } catch (err) {
+        setIsConnecting(false)
         if ((err as Error).name !== 'NotAllowedError') { setStatus('error'); setErrMsg('无法获取系统音频') } else setStatus('idle')
       }
     }
@@ -419,7 +461,36 @@ export default function Interpreter() {
     stopAudio()
   }
 
-  function toggleMic() { if (isRecording) stopRecording(); else startRecording() }
+  function toggleMic() { if (isConnecting) return; if (isRecording) stopRecording(); else startRecording() }
+
+  function downloadPDF() {
+    const win = window.open('', '_blank')
+    if (!win) return
+    const date = new Date().toLocaleString('zh-CN')
+    const rows = segsRef.current.map((s, i) => `
+      <div class="seg">
+        <div class="label">第 ${i + 1} 段</div>
+        <div class="en">EN: ${s.english}</div>
+        <div class="zh">${s.chinese || '(翻译中…)'}</div>
+      </div>`).join('')
+    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+      <title>聆译记录 ${date}</title>
+      <style>
+        body{font-family:'PingFang SC','Microsoft YaHei',sans-serif;max-width:760px;margin:48px auto;padding:0 24px;color:#111827}
+        h1{font-size:26px;color:#312e81;border-bottom:2px solid #e0e7ff;padding-bottom:10px;margin-bottom:4px}
+        .meta{color:#6b7280;font-size:13px;margin-bottom:36px}
+        .seg{margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #f3f4f6}
+        .label{font-size:10px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:#9ca3af;margin-bottom:4px}
+        .en{font-family:monospace;font-size:13px;color:#6b7280;margin-bottom:8px}
+        .zh{font-size:18px;color:#1e1b4b;line-height:1.65}
+      </style></head><body>
+      <h1>聆译 — 同声传译记录</h1>
+      <div class="meta">${date} · 共 ${segsRef.current.length} 段</div>
+      ${rows}
+      </body></html>`)
+    win.document.close()
+    win.print()
+  }
 
   const latest  = segments[segments.length - 1]
   const history = segments.slice(0, -1)
@@ -570,6 +641,15 @@ export default function Interpreter() {
               </span>
             )}
             {segments.length > 0 && (
+              <button onClick={downloadPDF}
+                className="text-xs transition-colors px-3 py-1.5 rounded-lg"
+                style={{ color: 'rgba(165,180,252,0.70)', background: 'rgba(79,70,229,0.15)', border: '1px solid rgba(129,140,248,0.25)' }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.color = '#a5b4fc'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(99,102,241,0.30)' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.color = 'rgba(165,180,252,0.70)'; (e.currentTarget as HTMLButtonElement).style.background = 'rgba(79,70,229,0.15)' }}>
+                导出 PDF
+              </button>
+            )}
+            {segments.length > 0 && (
               <button onClick={() => { setSegments([]); segsRef.current = [] }}
                 className="text-xs transition-colors px-3 py-1.5 rounded-lg"
                 style={{ color: 'rgba(255,255,255,0.35)', background: 'rgba(255,255,255,0.05)' }}
@@ -598,15 +678,25 @@ export default function Interpreter() {
             pointerEvents: 'none',
           }}>
             <div style={{ width: CONTAINER_SIZE, height: CONTAINER_SIZE }} />
-            <div style={{ textAlign: 'center' }}>
-              <p className="animate-shimmer-text font-medium" style={{
-                fontSize: 15, letterSpacing: '0.04em',
-                background: 'linear-gradient(90deg, #60a5fa 0%, #a78bfa 40%, #22d3ee 70%, #60a5fa 100%)',
-                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-              }}>点击麦克风开始</p>
-              <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 12, marginTop: 6, letterSpacing: '0.02em' }}>
-                实时英语同声传译
-              </p>
+            <div style={{ textAlign: 'center', maxWidth: 280, padding: '0 16px' }}>
+              {isConnecting ? (
+                <p className="animate-pulse font-medium" style={{ fontSize: 14, color: '#a5b4fc', letterSpacing: '0.04em' }}>
+                  正在请求麦克风权限…
+                </p>
+              ) : status === 'error' ? (
+                <p style={{ fontSize: 13, color: '#f87171', lineHeight: 1.6 }}>{errMsg}</p>
+              ) : (
+                <>
+                  <p className="animate-shimmer-text font-medium" style={{
+                    fontSize: 15, letterSpacing: '0.04em',
+                    background: 'linear-gradient(90deg, #60a5fa 0%, #a78bfa 40%, #22d3ee 70%, #60a5fa 100%)',
+                    WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+                  }}>点击麦克风开始</p>
+                  <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 12, marginTop: 6, letterSpacing: '0.02em' }}>
+                    实时英语同声传译
+                  </p>
+                </>
+              )}
             </div>
           </div>
 
@@ -622,37 +712,108 @@ export default function Interpreter() {
                 <p style={{ color: 'rgba(255,255,255,0.18)', fontSize: 14 }}>说话后字幕将出现在这里…</p>
               </div>
             ) : (
-              <div className="max-w-2xl mx-auto px-6 py-6 flex flex-col gap-5">
+              <div className="max-w-2xl mx-auto px-6 py-6 flex flex-col gap-4">
+
+                {/* History segments */}
                 {history.map((seg, idx) => {
                   const age = history.length - idx
-                  const opacity = Math.max(0.15, 0.6 - age * 0.07)
+                  const opacity = Math.max(0.12, 0.65 - age * 0.08)
                   return (
-                    <div key={seg.id} style={{ opacity }}>
-                      <p className="font-mono mb-1 line-clamp-1" style={{ fontSize: 11, color: 'rgba(255,255,255,0.28)' }}>{seg.english}</p>
-                      <p style={{ fontSize: 18, color: 'rgba(255,255,255,0.72)', lineHeight: 1.4 }}>{seg.chinese}</p>
+                    <div key={seg.id} style={{ opacity, display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      {/* English bubble — transparent */}
+                      <div style={{
+                        alignSelf: 'flex-start',
+                        background: 'rgba(255,255,255,0.06)',
+                        border: '1px solid rgba(255,255,255,0.11)',
+                        borderRadius: '16px 16px 16px 4px',
+                        padding: '7px 14px',
+                        maxWidth: '90%',
+                      }}>
+                        <p className="font-mono line-clamp-2" style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
+                          {seg.english}
+                        </p>
+                      </div>
+                      {/* Chinese bubble — blue-purple */}
+                      {seg.chinese && (
+                        <div style={{
+                          alignSelf: 'flex-start',
+                          background: 'linear-gradient(135deg, rgba(79,70,229,0.40), rgba(37,99,235,0.28))',
+                          border: '1px solid rgba(129,140,248,0.30)',
+                          borderRadius: '4px 16px 16px 16px',
+                          padding: '9px 16px',
+                          maxWidth: '90%',
+                          boxShadow: '0 2px 16px rgba(79,70,229,0.18)',
+                        }}>
+                          <p style={{ fontSize: 17, color: '#e0e7ff', lineHeight: 1.5 }}>{seg.chinese}</p>
+                        </div>
+                      )}
                     </div>
                   )
                 })}
+
+                {/* Latest segment */}
                 {latest && (
-                  <div className="animate-fade-up">
-                    <p className="font-mono mb-2 line-clamp-2" style={{ fontSize: 12, color: 'rgba(255,255,255,0.35)' }}>{latest.english}</p>
-                    <p className="font-medium" style={{
-                      fontSize: 'clamp(20px, 2.8vw, 30px)',
-                      lineHeight: 1.35,
-                      color: latest.isStreaming ? '#93c5fd' : '#f1f5f9',
-                      transition: 'color 0.3s',
+                  <div className="animate-fade-up" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {/* English bubble */}
+                    <div style={{
+                      alignSelf: 'flex-start',
+                      background: 'rgba(255,255,255,0.08)',
+                      border: '1px solid rgba(255,255,255,0.15)',
+                      borderRadius: '16px 16px 16px 4px',
+                      padding: '8px 16px',
+                      maxWidth: '90%',
                     }}>
-                      {latest.chinese}
-                      {latest.isStreaming && (
-                        <span className="animate-blink inline-block ml-1 align-middle"
-                          style={{ width: 2, height: '0.85em', background: '#60a5fa', borderRadius: 1 }} />
-                      )}
+                      <p className="font-mono" style={{ fontSize: 13, color: 'rgba(255,255,255,0.55)' }}>
+                        {latest.english}
+                      </p>
+                    </div>
+                    {/* Chinese bubble */}
+                    <div style={{
+                      alignSelf: 'flex-start',
+                      background: latest.isStreaming
+                        ? 'linear-gradient(135deg, rgba(99,102,241,0.45), rgba(37,99,235,0.35))'
+                        : 'linear-gradient(135deg, rgba(79,70,229,0.50), rgba(37,99,235,0.38))',
+                      border: `1px solid ${latest.isStreaming ? 'rgba(147,197,253,0.40)' : 'rgba(129,140,248,0.35)'}`,
+                      borderRadius: '4px 16px 16px 16px',
+                      padding: '12px 20px',
+                      maxWidth: '90%',
+                      boxShadow: latest.isStreaming
+                        ? '0 4px 24px rgba(99,102,241,0.30)'
+                        : '0 2px 16px rgba(79,70,229,0.22)',
+                      minHeight: 46,
+                      transition: 'background 0.3s, box-shadow 0.3s',
+                    }}>
+                      <p className="font-medium" style={{
+                        fontSize: 'clamp(18px, 2.4vw, 26px)',
+                        lineHeight: 1.45,
+                        color: latest.isStreaming ? '#bfdbfe' : '#e0e7ff',
+                        transition: 'color 0.3s',
+                      }}>
+                        {latest.chinese || (latest.isStreaming ? '' : '')}
+                        {latest.isStreaming && (
+                          <span className="animate-blink inline-block ml-1 align-middle"
+                            style={{ width: 2, height: '0.85em', background: '#93c5fd', borderRadius: 1 }} />
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Interim (speech being recognized) */}
+                {interim && (
+                  <div style={{
+                    alignSelf: 'flex-start',
+                    background: 'rgba(255,255,255,0.04)',
+                    border: '1px dashed rgba(255,255,255,0.15)',
+                    borderRadius: '16px 16px 16px 4px',
+                    padding: '7px 14px',
+                  }}>
+                    <p className="italic font-mono" style={{ fontSize: 12, color: 'rgba(255,255,255,0.30)' }}>
+                      {interim}…
                     </p>
                   </div>
                 )}
-                {interim && (
-                  <p className="italic font-mono" style={{ fontSize: 12, color: 'rgba(255,255,255,0.28)' }}>"{interim}…"</p>
-                )}
+
                 <div ref={bottomRef} />
               </div>
             )}
@@ -669,9 +830,10 @@ export default function Interpreter() {
         pointerEvents: 'none',
       }}>
         <div style={{ width: '100%', height: '100%', pointerEvents: 'auto' }}>
-          <MicVisualizer level={audioLevel} isRecording={isRecording} status={status} onClick={toggleMic} />
+          <MicVisualizer level={audioLevel} isRecording={isRecording} isConnecting={isConnecting} status={status} onClick={toggleMic} />
         </div>
       </div>
+
     </>
   )
 }
