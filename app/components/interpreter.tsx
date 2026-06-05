@@ -511,7 +511,7 @@ export default function Interpreter() {
         return
       }
       const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' })
-      if (blob.size < 2000) {
+      if (blob.size < 6000) {
         if (whisperActiveRef.current) captureSegment(stream)
         return
       }
@@ -525,9 +525,11 @@ export default function Interpreter() {
         fd.append('language', sourceLangRef.current.slice(0, 2))
         const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
         const data = await res.json()
-        if (data.text?.trim().length > 1) {
+        const text = (data.text ?? '').trim()
+        const isHallucination = !text || text.length <= 1 || /^(thank you\.?|thanks\.?|you\.?|bye\.?|\.+|。+)$/i.test(text)
+        if (!isHallucination) {
           setInterim('')
-          translate(data.text.trim())
+          translate(text)
         } else {
           setInterim('')
           if (whisperActiveRef.current) setStatus('listening')
@@ -544,9 +546,9 @@ export default function Interpreter() {
 
     // Silence detection — read directly from AnalyserNode
     let silenceMs = 0
-    const SILENCE_THRESHOLD = 0.02
-    const SILENCE_REQUIRED = 1300
-    const MIN_DURATION = 500
+    const SILENCE_THRESHOLD = 0.03
+    const SILENCE_REQUIRED = 1500
+    const MIN_DURATION = 1000
 
     const ticker = setInterval(() => {
       if (!whisperActiveRef.current) {
