@@ -21,6 +21,17 @@ const MIC_SIZE_IDLE = 120
 const MIC_SIZE_ACTIVE = 64
 const CORNER_GAP = 20
 
+const LANGUAGES = [
+  { code: 'en-US', label: 'English',  name: 'English'              },
+  { code: 'zh-CN', label: '中文',     name: 'Chinese (Simplified)' },
+  { code: 'ja-JP', label: '日本語',   name: 'Japanese'             },
+  { code: 'ko-KR', label: '한국어',   name: 'Korean'               },
+  { code: 'es-ES', label: 'Español',  name: 'Spanish'              },
+  { code: 'fr-FR', label: 'Français', name: 'French'               },
+  { code: 'de-DE', label: 'Deutsch',  name: 'German'               },
+] as const
+type LangCode = typeof LANGUAGES[number]['code']
+
 // ── Animated sci-fi background ────────────────────────────────────────────
 function AnimatedBackground() {
   const ref = useRef<HTMLCanvasElement>(null)
@@ -261,6 +272,8 @@ function MicVisualizer({
 // ── Main ──────────────────────────────────────────────────────────────────
 export default function Interpreter() {
   const [mode, setMode]               = useState<Mode>('mic')
+  const [sourceLang, setSourceLang]   = useState<LangCode>('en-US')
+  const [targetLang, setTargetLang]   = useState<LangCode>('zh-CN')
   const [isOnPage, setIsOnPage]         = useState(false)
   const [isRecording, setIsRecording]   = useState(false)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -270,6 +283,7 @@ export default function Interpreter() {
   const [errMsg, setErrMsg]           = useState('')
   const [bars, setBars]               = useState<number[]>(new Array(BAR_COUNT).fill(0))
   const [hasSR, setHasSR]             = useState(true)
+  const [ttsOn, setTtsOn]             = useState(true)
 
   const recogRef     = useRef<any>(null)
   const audioCtxRef  = useRef<AudioContext | null>(null)
@@ -278,11 +292,18 @@ export default function Interpreter() {
   const segsRef      = useRef<Segment[]>([])
   const recordingRef = useRef(false)
   const bottomRef    = useRef<HTMLDivElement>(null)
+  const ttsOnRef      = useRef(true)
+  const speakRef      = useRef<(text: string) => void>(() => {})
+  const sourceLangRef = useRef<LangCode>('en-US')
+  const targetLangRef = useRef<LangCode>('zh-CN')
 
   const audioLevel = bars.reduce((a, b) => a + b, 0) / bars.length
 
   useEffect(() => { segsRef.current = segments }, [segments])
   useEffect(() => { recordingRef.current = isRecording }, [isRecording])
+  useEffect(() => { ttsOnRef.current = ttsOn }, [ttsOn])
+  useEffect(() => { sourceLangRef.current = sourceLang }, [sourceLang])
+  useEffect(() => { targetLangRef.current = targetLang }, [targetLang])
 
   useEffect(() => {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
@@ -332,7 +353,7 @@ export default function Interpreter() {
     try {
       const res = await fetch('/api/translate', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text, context: ctx }),
+        body: JSON.stringify({ text, context: ctx, sourceLang: sourceLangRef.current, targetLang: targetLangRef.current }),
       })
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
 
@@ -362,6 +383,7 @@ export default function Interpreter() {
         }
         segsRef.current = up; return up
       })
+      if (mainText) speakRef.current(mainText)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setSegments(p => p.map(s => s.id === segId ? { ...s, chinese: `[错误: ${msg}]`, isStreaming: false } : s))
@@ -373,7 +395,7 @@ export default function Interpreter() {
   function makeRecog() {
     const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
     if (!SR) return null
-    const r = new SR(); r.lang = 'en-US'; r.continuous = true; r.interimResults = true
+    const r = new SR(); r.lang = sourceLangRef.current; r.continuous = true; r.interimResults = true
     r.onresult = (e: any) => {
       let itr = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
@@ -458,9 +480,24 @@ export default function Interpreter() {
     recogRef.current?.abort(); recogRef.current = null
     sysStreamRef.current?.getTracks().forEach(t => t.stop()); sysStreamRef.current = null
     stopAudio()
+    window.speechSynthesis.cancel()
   }
 
   function toggleMic() { if (isConnecting) return; if (isRecording) stopRecording(); else startRecording() }
+
+  function speak(text: string) {
+    if (!ttsOnRef.current || !text || typeof window === 'undefined') return
+    window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text)
+    const lang = targetLangRef.current
+    u.lang = lang
+    u.rate = 1.1
+    const voices = window.speechSynthesis.getVoices()
+    const match = voices.find(v => v.lang.startsWith(lang.slice(0, 2)))
+    if (match) u.voice = match
+    window.speechSynthesis.speak(u)
+  }
+  speakRef.current = speak
 
   function downloadPDF() {
     const win = window.open('', '_blank')
@@ -587,6 +624,45 @@ export default function Interpreter() {
               })}
             </div>
 
+            {/* Language pair selector */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <select value={sourceLang} onChange={e => {
+                  const val = e.target.value as LangCode
+                  if (val === targetLang) setTargetLang(sourceLang)
+                  setSourceLang(val)
+                }}
+                style={{
+                  padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 500,
+                  border: '1px solid rgba(251,191,36,0.40)', outline: 'none', cursor: 'pointer',
+                  background: 'rgba(217,119,6,0.18)', color: '#fde68a',
+                  appearance: 'none', WebkitAppearance: 'none', minWidth: 120,
+                }}>
+                {LANGUAGES.map(l => <option key={l.code} value={l.code} style={{ background: '#1e1b4b', color: '#fff' }}>{l.label}</option>)}
+              </select>
+
+              <button onClick={() => { setSourceLang(targetLang); setTargetLang(sourceLang) }}
+                style={{
+                  width: 34, height: 34, borderRadius: '50%', cursor: 'pointer', flexShrink: 0,
+                  border: '1px solid rgba(255,255,255,0.15)', background: 'rgba(255,255,255,0.06)',
+                  color: 'rgba(255,255,255,0.55)', fontSize: 15, transition: 'all 200ms',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.15)'; (e.currentTarget as HTMLButtonElement).style.color = '#fff' }}
+                onMouseLeave={e => { (e.currentTarget as HTMLButtonElement).style.background = 'rgba(255,255,255,0.06)'; (e.currentTarget as HTMLButtonElement).style.color = 'rgba(255,255,255,0.55)' }}>
+                ⇄
+              </button>
+
+              <select value={targetLang} onChange={e => setTargetLang(e.target.value as LangCode)}
+                style={{
+                  padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 500,
+                  border: '1px solid rgba(129,140,248,0.40)', outline: 'none', cursor: 'pointer',
+                  background: 'rgba(79,70,229,0.22)', color: '#c4b5fd',
+                  appearance: 'none', WebkitAppearance: 'none', minWidth: 120,
+                }}>
+                {LANGUAGES.filter(l => l.code !== sourceLang).map(l => <option key={l.code} value={l.code} style={{ background: '#1e1b4b', color: '#fff' }}>{l.label}</option>)}
+              </select>
+            </div>
+
             <button onClick={enterPage} disabled={!hasSR}
               className="animate-gradient-shift flex items-center justify-center gap-2.5 font-semibold text-sm transition-shadow duration-150 disabled:opacity-40"
               style={{
@@ -628,6 +704,9 @@ export default function Interpreter() {
             <Logo size={18} />
             <span style={{ color: 'rgba(255,255,255,0.2)', fontSize: 12, fontWeight: 300 }}>|</span>
             <span style={{ color: 'rgba(255,255,255,0.35)', fontSize: 12 }}>您忠实的 AI 同声传译助手</span>
+            <span style={{ fontSize: 11, padding: '2px 10px', borderRadius: 10, background: 'rgba(79,70,229,0.22)', color: '#a5b4fc', border: '1px solid rgba(129,140,248,0.25)' }}>
+              {LANGUAGES.find(l => l.code === sourceLang)?.label} → {LANGUAGES.find(l => l.code === targetLang)?.label}
+            </span>
           </div>
           <div className="flex items-center gap-3">
             {status !== 'idle' && (
@@ -639,6 +718,20 @@ export default function Interpreter() {
                 {statusLabel[status]}
               </span>
             )}
+            <button onClick={() => { setTtsOn(p => !p); window.speechSynthesis.cancel() }}
+              className="text-xs transition-colors px-3 py-1.5 rounded-lg flex items-center gap-1.5"
+              style={{ color: ttsOn ? '#86efac' : 'rgba(255,255,255,0.30)', background: ttsOn ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.05)', border: `1px solid ${ttsOn ? 'rgba(134,239,172,0.30)' : 'rgba(255,255,255,0.08)'}` }}>
+              {ttsOn ? (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                </svg>
+              ) : (
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
+                </svg>
+              )}
+              {ttsOn ? '朗读中' : '已静音'}
+            </button>
             {segments.length > 0 && (
               <button onClick={downloadPDF}
                 className="text-xs transition-colors px-3 py-1.5 rounded-lg"
