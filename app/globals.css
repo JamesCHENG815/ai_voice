@@ -22,3 +22,18 @@ html, body {
   to   { opacity: 1; transform: translateY(0); }
 }
 .animate-fade-up { animation: fade-up 0.25s ease-out both; }
+
+@keyframes idle-pulse {
+  0%, 100% { transform: scale(1);    opacity: 0.45; }
+  50%       { transform: scale(1.13); opacity: 0.15; }
+}
+.animate-idle-pulse { animation: idle-pulse 3s ease-in-out infinite; }
+
+@keyframes shimmer-text {
+  0%   { background-position: 0%   center; }
+  100% { background-position: 200% center; }
+}
+.animate-shimmer-text {
+  background-size: 200% auto;
+  animation: shimmer-text 4s linear infinite;
+}
