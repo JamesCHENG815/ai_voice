@@ -6,8 +6,8 @@ html, body {
   height: 100%;
   margin: 0;
   padding: 0;
-  background: #ffffff;
-  color: #111827;
+  background: #030712;
+  color: #f1f5f9;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -36,4 +36,14 @@ html, body {
 .animate-shimmer-text {
   background-size: 200% auto;
   animation: shimmer-text 4s linear infinite;
+}
+
+@keyframes gradient-shift {
+  0%   { background-position: 0%   50%; }
+  50%  { background-position: 100% 50%; }
+  100% { background-position: 0%   50%; }
+}
+.animate-gradient-shift {
+  background-size: 300% 300%;
+  animation: gradient-shift 5s ease infinite;
 }
