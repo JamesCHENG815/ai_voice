@@ -32,6 +32,17 @@ const LANGUAGES = [
 ] as const
 type LangCode = typeof LANGUAGES[number]['code']
 
+// Returns the index after the last sentence-ending punctuation in text
+function lastSentenceBoundary(text: string): number {
+  let last = 0
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]
+    if ('。！？…'.includes(ch)) { last = i + 1 }
+    else if ('.!?'.includes(ch) && (i + 1 >= text.length || text[i + 1] === ' ' || text[i + 1] === '\n')) { last = i + 1 }
+  }
+  return last
+}
+
 // ── Animated sci-fi background ────────────────────────────────────────────
 function AnimatedBackground() {
   const ref = useRef<HTMLCanvasElement>(null)
@@ -292,10 +303,12 @@ export default function Interpreter() {
   const segsRef      = useRef<Segment[]>([])
   const recordingRef = useRef(false)
   const bottomRef    = useRef<HTMLDivElement>(null)
-  const ttsOnRef      = useRef(true)
-  const speakRef      = useRef<(text: string) => void>(() => {})
-  const sourceLangRef = useRef<LangCode>('en-US')
-  const targetLangRef = useRef<LangCode>('zh-CN')
+  const ttsOnRef           = useRef(true)
+  const speakRef           = useRef<(text: string) => void>(() => {})
+  const sourceLangRef      = useRef<LangCode>('en-US')
+  const targetLangRef      = useRef<LangCode>('zh-CN')
+  const interimTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const lastSentTextRef    = useRef<string>('')
 
   const audioLevel = bars.reduce((a, b) => a + b, 0) / bars.length
 
@@ -357,15 +370,24 @@ export default function Interpreter() {
       })
       if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`)
 
-      const reader = res.body.getReader(); const dec = new TextDecoder(); let acc = ''
+      const reader = res.body.getReader(); const dec = new TextDecoder(); let acc = ''; let spokenLen = 0
       while (true) {
         const { done, value } = await reader.read(); if (done) break
         for (const line of dec.decode(value, { stream: true }).split('\n')) {
           if (!line.startsWith('data: ')) continue
           let msg: any
           try { msg = JSON.parse(line.slice(6)) } catch { continue }
-          if (msg.type === 'delta') { acc += msg.text; setSegments(p => p.map(s => s.id === segId ? { ...s, chinese: acc } : s)) }
-          else if (msg.type === 'error') { console.error('[translate] API error:', msg.message); throw new Error(msg.message) }
+          if (msg.type === 'delta') {
+            acc += msg.text
+            setSegments(p => p.map(s => s.id === segId ? { ...s, chinese: acc } : s))
+            // Speak each completed sentence immediately as it streams in
+            const unspoken = acc.slice(spokenLen)
+            const cutAt = lastSentenceBoundary(unspoken)
+            if (cutAt > 0) {
+              speakRef.current(unspoken.slice(0, cutAt), spokenLen === 0)
+              spokenLen += cutAt
+            }
+          } else if (msg.type === 'error') { throw new Error(msg.message) }
         }
       }
 
@@ -383,7 +405,9 @@ export default function Interpreter() {
         }
         segsRef.current = up; return up
       })
-      if (mainText) speakRef.current(mainText)
+      // Speak any remaining text after streaming ends
+      const remaining = mainText.slice(spokenLen).trim()
+      if (remaining) speakRef.current(remaining, spokenLen === 0)
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       setSegments(p => p.map(s => s.id === segId ? { ...s, chinese: `[错误: ${msg}]`, isStreaming: false } : s))
@@ -399,8 +423,16 @@ export default function Interpreter() {
     r.onresult = (e: any) => {
       let itr = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
-        if (e.results[i].isFinal) { const t = e.results[i][0].transcript.trim(); if (t.length > 1) { translate(t); setInterim('') } }
-        else { itr += e.results[i][0].transcript }
+        if (e.results[i].isFinal) {
+          const t = e.results[i][0].transcript.trim()
+          if (t.length > 1) { translate(t); setInterim('') }
+        } else {
+          itr += e.results[i][0].transcript
+        }
+      }
+      // Cancel TTS the moment new speech is detected so the mic stays clean
+      if (itr.trim() && window.speechSynthesis.speaking) {
+        window.speechSynthesis.cancel()
       }
       setInterim(itr)
     }
@@ -477,6 +509,8 @@ export default function Interpreter() {
 
   function stopRecording() {
     setIsRecording(false); setStatus('idle'); setInterim('')
+    if (interimTimerRef.current) { clearTimeout(interimTimerRef.current); interimTimerRef.current = null }
+    lastSentTextRef.current = ''
     recogRef.current?.abort(); recogRef.current = null
     sysStreamRef.current?.getTracks().forEach(t => t.stop()); sysStreamRef.current = null
     stopAudio()
@@ -485,13 +519,13 @@ export default function Interpreter() {
 
   function toggleMic() { if (isConnecting) return; if (isRecording) stopRecording(); else startRecording() }
 
-  function speak(text: string) {
-    if (!ttsOnRef.current || !text || typeof window === 'undefined') return
-    window.speechSynthesis.cancel()
-    const u = new SpeechSynthesisUtterance(text)
+  function speak(text: string, cancelFirst = true) {
+    if (!ttsOnRef.current || !text.trim() || typeof window === 'undefined') return
+    if (cancelFirst) window.speechSynthesis.cancel()
+    const u = new SpeechSynthesisUtterance(text.trim())
     const lang = targetLangRef.current
     u.lang = lang
-    u.rate = 1.1
+    u.rate = 1.15
     const voices = window.speechSynthesis.getVoices()
     const match = voices.find(v => v.lang.startsWith(lang.slice(0, 2)))
     if (match) u.voice = match

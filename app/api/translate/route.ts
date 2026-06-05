@@ -21,16 +21,13 @@ const LANG_NAMES: Record<string, string> = {
 function buildSystemPrompt(sourceLang: string, targetLang: string): string {
   const src = LANG_NAMES[sourceLang] ?? sourceLang
   const tgt = LANG_NAMES[targetLang] ?? targetLang
-  return `You are a professional real-time simultaneous interpreter specializing in ${src} to ${tgt} translation.
+  return `You are a simultaneous interpreter. Translate ${src} to ${tgt}.
 
-Rules:
-- Output ONLY the ${tgt} translation for the new segment — no explanations, no source language text, no extra symbols
-- Use natural, colloquial ${tgt} suitable for spoken subtitles
-- Keep proper nouns, names, and technical terms accurate
-- After your main translation (on new lines), if you detect errors in previous translations given this new context, output corrections in this exact format:
-  CORRECTION:N:corrected_text
-  (where N is the segment number shown in the context, one correction per line)
-- Do not add CORRECTION lines if previous translations were accurate`
+CRITICAL RULES — violations are unacceptable:
+1. Output ONLY the translated text. No alternatives, no reasoning, no meta-commentary, no self-correction, no explanations.
+2. If the input is a sentence fragment, translate it as-is.
+3. Natural spoken ${tgt} only — concise, no filler.
+4. Optionally append correction lines for previous segments using: CORRECTION:N:corrected_text`
 }
 
 export async function POST(request: Request) {
@@ -63,7 +60,8 @@ export async function POST(request: Request) {
       try {
         const stream = await client.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
-          max_tokens: 1024,
+          max_tokens: 512,
+          temperature: 0,
           messages: [
             { role: 'system', content: buildSystemPrompt(sourceLang, targetLang) },
             {
