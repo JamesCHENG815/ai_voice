@@ -21,13 +21,16 @@ const LANG_NAMES: Record<string, string> = {
 function buildSystemPrompt(sourceLang: string, targetLang: string): string {
   const src = LANG_NAMES[sourceLang] ?? sourceLang
   const tgt = LANG_NAMES[targetLang] ?? targetLang
+  const chineseRule = targetLang === 'zh-CN'
+    ? '\n5. Use Simplified Chinese characters (简体中文) ONLY. Never output Traditional Chinese (繁體字).'
+    : ''
   return `You are a simultaneous interpreter. Translate ${src} to ${tgt}.
 
 CRITICAL RULES — violations are unacceptable:
 1. Output ONLY the translated text. No alternatives, no reasoning, no meta-commentary, no self-correction, no explanations.
 2. If the input is a sentence fragment, translate it as-is.
 3. Natural spoken ${tgt} only — concise, no filler.
-4. Optionally append correction lines for previous segments using: CORRECTION:N:corrected_text`
+4. Optionally append correction lines for previous segments using: CORRECTION:N:corrected_text${chineseRule}`
 }
 
 export async function POST(request: Request) {
