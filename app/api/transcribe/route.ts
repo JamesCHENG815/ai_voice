@@ -8,6 +8,7 @@ export async function POST(request: Request) {
   const formData = await request.formData()
   const audio = formData.get('audio') as File | null
   const language = (formData.get('language') as string | null) ?? 'en'
+  const prompt = (formData.get('prompt') as string | null) ?? ''
 
   if (!audio) {
     return Response.json({ error: 'No audio provided' }, { status: 400 })
@@ -16,9 +17,11 @@ export async function POST(request: Request) {
   try {
     const transcription = await client.audio.transcriptions.create({
       file: audio,
-      model: 'whisper-large-v3-turbo',
+      model: 'whisper-large-v3',
       language,
       response_format: 'json',
+      temperature: 0,
+      ...(prompt ? { prompt } : {}),
     })
     return Response.json({ text: transcription.text })
   } catch (err) {

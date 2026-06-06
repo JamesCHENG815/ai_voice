@@ -315,7 +315,11 @@ export default function Interpreter() {
   const targetLangRef      = useRef<LangCode>('zh-CN')
   const interimTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSentTextRef    = useRef<string>('')
-  const isTtsSpeakingRef   = useRef(false)
+  const isTtsSpeakingRef       = useRef(false)
+  const textBufferRef          = useRef('')
+  const whisperPromptRef       = useRef('')
+  const silenceFlushTimerRef   = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const ttsCancelIntervalRef   = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const audioLevel = bars.reduce((a, b) => a + b, 0) / bars.length
 
@@ -495,94 +499,67 @@ export default function Interpreter() {
 
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
-      : MediaRecorder.isTypeSupported('audio/mp4')
-      ? 'audio/mp4'
-      : ''
+      : MediaRecorder.isTypeSupported('audio/mp4') ? 'audio/mp4' : ''
 
     const mr = new MediaRecorder(stream, mimeType ? { mimeType } : undefined)
     mediaRecorderRef.current = mr
     const chunks: Blob[] = []
-    const segStart = Date.now()
 
     mr.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data) }
 
     mr.onstop = async () => {
-      const elapsed = Date.now() - segStart
-      if (elapsed < 400 || chunks.length === 0) {
-        if (whisperActiveRef.current) captureSegment(stream)
-        return
-      }
-      const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' })
-      if (blob.size < 6000) {
-        if (whisperActiveRef.current) captureSegment(stream)
-        return
-      }
+      // Immediately start next chunk so recording is continuous
+      if (whisperActiveRef.current) captureSegment(stream)
 
-      setStatus('processing')
-      setInterim('识别中…')
+      const blob = new Blob(chunks, { type: mr.mimeType || 'audio/webm' })
+      // Skip near-silent blobs to avoid Whisper hallucinations
+      if (blob.size < 4000) return
+
       try {
         const ext = (mr.mimeType || '').includes('mp4') ? 'm4a' : 'webm'
         const fd = new FormData()
         fd.append('audio', blob, `audio.${ext}`)
         fd.append('language', sourceLangRef.current.slice(0, 2))
+        // Pass recent transcript as prompt so Whisper has cross-chunk context
+        const prompt = (whisperPromptRef.current + ' ' + textBufferRef.current).trim().slice(-200)
+        if (prompt) fd.append('prompt', prompt)
         const res = await fetch('/api/transcribe', { method: 'POST', body: fd })
         const data = await res.json()
-        const text = (data.text ?? '').trim()
-        const isHallucination = !text || text.length <= 1 || /^(thank you\.?|thanks\.?|you\.?|bye\.?|\.+|。+)$/i.test(text)
-        if (!isHallucination && !isTtsSpeakingRef.current) {
-          setInterim('')
-          translate(text)
-        } else {
-          setInterim('')
-          if (whisperActiveRef.current) setStatus('listening')
-        }
-      } catch {
-        setInterim('')
-        if (whisperActiveRef.current) setStatus('listening')
-      }
+        const raw = (data.text ?? '').trim()
 
-      if (whisperActiveRef.current) captureSegment(stream)
+        const isHallucination = !raw || raw.length <= 1 ||
+          /^(thank you\.?|thanks\.?|you\.?|bye\.?|\.+|。+)$/i.test(raw)
+        if (isHallucination || isTtsSpeakingRef.current) return
+
+        whisperPromptRef.current = raw  // keep for next chunk's context
+
+        // Accumulate into buffer
+        textBufferRef.current += (textBufferRef.current ? ' ' : '') + raw
+
+        // Translate every complete sentence found in the buffer immediately
+        const boundary = lastSentenceBoundary(textBufferRef.current)
+        if (boundary > 0) {
+          const sentence = textBufferRef.current.slice(0, boundary).trim()
+          textBufferRef.current = textBufferRef.current.slice(boundary).trim()
+          if (silenceFlushTimerRef.current) { clearTimeout(silenceFlushTimerRef.current); silenceFlushTimerRef.current = null }
+          translate(sentence)
+        }
+
+        // If incomplete sentence remains, flush it after 1.5 s of no new words
+        if (textBufferRef.current) {
+          if (silenceFlushTimerRef.current) clearTimeout(silenceFlushTimerRef.current)
+          silenceFlushTimerRef.current = setTimeout(() => {
+            const leftover = textBufferRef.current.trim()
+            if (leftover) { textBufferRef.current = ''; translate(leftover) }
+            silenceFlushTimerRef.current = null
+          }, 1500)
+        }
+      } catch { /* ignore individual chunk errors */ }
     }
 
     mr.start(100)
-
-    // Silence detection — read directly from AnalyserNode
-    let silenceMs = 0
-    const SILENCE_THRESHOLD = 0.03
-    const SILENCE_REQUIRED = 1500
-    const MIN_DURATION = 1000
-
-    const ticker = setInterval(() => {
-      if (!whisperActiveRef.current) {
-        clearInterval(ticker)
-        if (mr.state === 'recording') mr.stop()
-        return
-      }
-      const level = getAudioLevel()
-      const elapsed = Date.now() - segStart
-
-      // Stop TTS as soon as voice is detected so recognition stays clean
-      if (level >= SILENCE_THRESHOLD && isTtsSpeakingRef.current) {
-        window.speechSynthesis.cancel()
-        isTtsSpeakingRef.current = false
-      }
-
-      if (level < SILENCE_THRESHOLD) {
-        silenceMs += 100
-        if (silenceMs >= SILENCE_REQUIRED && elapsed >= MIN_DURATION) {
-          clearInterval(ticker)
-          if (mr.state === 'recording') mr.stop()
-        }
-      } else {
-        silenceMs = 0
-      }
-
-      // Hard cap at 25s per segment
-      if (elapsed >= 25000) {
-        clearInterval(ticker)
-        if (mr.state === 'recording') mr.stop()
-      }
-    }, 100)
+    // 5-second chunks — gives Whisper enough context for high accuracy
+    setTimeout(() => { if (mr.state === 'recording') mr.stop() }, 5000)
   }
 
   async function startWhisperRecording() {
@@ -593,6 +570,14 @@ export default function Interpreter() {
       startAudio(stream)
       whisperActiveRef.current = true
       recordingRef.current = true
+      textBufferRef.current = ''
+      // Watch for voice during TTS and cancel playback immediately
+      ttsCancelIntervalRef.current = setInterval(() => {
+        if (isTtsSpeakingRef.current && getAudioLevel() >= 0.03) {
+          window.speechSynthesis.cancel()
+          isTtsSpeakingRef.current = false
+        }
+      }, 100)
       setIsConnecting(false)
       setIsRecording(true)
       setStatus('listening')
@@ -613,6 +598,12 @@ export default function Interpreter() {
     mediaRecorderRef.current = null
     whisperStreamRef.current?.getTracks().forEach(t => t.stop())
     whisperStreamRef.current = null
+    sysStreamRef.current?.getTracks().forEach(t => t.stop())
+    sysStreamRef.current = null
+    if (ttsCancelIntervalRef.current) { clearInterval(ttsCancelIntervalRef.current); ttsCancelIntervalRef.current = null }
+    if (silenceFlushTimerRef.current) { clearTimeout(silenceFlushTimerRef.current); silenceFlushTimerRef.current = null }
+    textBufferRef.current = ''
+    whisperPromptRef.current = ''
     stopAudio()
     window.speechSynthesis.cancel()
     setIsRecording(false)
@@ -652,11 +643,24 @@ export default function Interpreter() {
           s.getTracks().forEach(t => t.stop())
           setIsConnecting(false); setStatus('error'); setErrMsg('未检测到系统音频，请在弹窗中勾选「共享系统音频」'); return
         }
-        sysStreamRef.current = s; startAudio(new MediaStream(aTracks))
+        sysStreamRef.current = s
+        const audioStream = new MediaStream(aTracks)
+        startAudio(audioStream)
         aTracks.forEach(t => { t.onended = () => { if (recordingRef.current) stopRecording() } })
         s.getVideoTracks().forEach(t => t.stop())
-        const r = makeRecog(); if (r) { recogRef.current = r; r.start() }
+        // Route system audio through Whisper just like mic mode
+        whisperStreamRef.current = audioStream
+        whisperActiveRef.current = true
+        recordingRef.current = true
+        textBufferRef.current = ''
+        ttsCancelIntervalRef.current = setInterval(() => {
+          if (isTtsSpeakingRef.current && getAudioLevel() >= 0.03) {
+            window.speechSynthesis.cancel()
+            isTtsSpeakingRef.current = false
+          }
+        }, 100)
         setIsConnecting(false); setIsRecording(true); setStatus('listening')
+        captureSegment(audioStream)
       } catch (err) {
         setIsConnecting(false)
         if ((err as Error).name !== 'NotAllowedError') { setStatus('error'); setErrMsg('无法获取系统音频') } else setStatus('idle')
