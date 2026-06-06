@@ -326,6 +326,18 @@ export default function Interpreter() {
   useEffect(() => { segsRef.current = segments }, [segments])
   useEffect(() => { recordingRef.current = isRecording }, [isRecording])
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (!isOnPage) return
+      const tag = (e.target as HTMLElement).tagName
+      if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA') return
+      if (e.code === 'Space') { e.preventDefault(); toggleMic() }
+      if (e.code === 'Escape') { e.preventDefault(); if (recordingRef.current) stopRecording() }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnPage, isRecording, isConnecting])
+  useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
     check()
     window.addEventListener('resize', check)
@@ -1072,6 +1084,9 @@ export default function Interpreter() {
                   }}>点击麦克风开始</p>
                   <p style={{ color: 'rgba(255,255,255,0.25)', fontSize: 12, marginTop: 6, letterSpacing: '0.02em' }}>
                     实时英语同声传译
+                  </p>
+                  <p style={{ color: 'rgba(255,255,255,0.18)', fontSize: 11, marginTop: 8, letterSpacing: '0.02em' }}>
+                    空格键开始 / 停止 &nbsp;·&nbsp; Esc 停止
                   </p>
                 </>
               )}
