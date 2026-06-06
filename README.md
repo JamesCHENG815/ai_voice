@@ -1,8 +1,8 @@
-# AI 同声传译助手
+# 聆译 — AI 同声传译助手
 
 > 七牛云 × XEngineer 暑期训练营第 3 期 · 题目二
 
-实时将英语音频流翻译成中文字幕，由 **Claude Opus 4.8** 提供翻译能力，支持流式输出与滚动上下文纠错。
+实时语音识别 + AI 翻译，支持 7 种语言互译，流式字幕输出，可选语音朗读。
 
 ## Demo 视频
 
@@ -11,46 +11,47 @@
 
 ## 功能特性
 
-- 🎤 **麦克风模式** — 浏览器内置 Web Speech API 实时识别英语，Claude API 流式翻译为中文字幕
-- 🖥️ **系统音频模式** — 通过 `getDisplayMedia` 捕获屏幕/标签页音频，配合虚拟声卡可实现全自动识别
+- 🎤 **麦克风模式** — 捕获麦克风输入，Groq Whisper 实时识别，Claude 流式翻译为字幕
+- 🖥️ **系统音频模式** — 通过 `getDisplayMedia` 捕获屏幕/标签页音频，适合翻译会议、视频
+- 🌐 **7 种语言互译** — 中文、英文、日语、韩语、西班牙语、法语、德语任意互译
 - ⚡ **流式字幕输出** — 翻译结果逐字流出，低延迟实时展示
-- 🔄 **滚动上下文纠错** — 每次翻译携带前 5 条记录作上下文，Claude 可自动修正前序错误译文
-- 🌊 **频谱可视化** — 基于 Web Audio API 的实时频谱柱状图
+- 🔄 **上下文感知纠错** — 携带前 5 条历史上下文，自动修正前序错误译文
+- 🔊 **语音播报（TTS）** — 译文逐句朗读，开口说话时自动暂停，避免干扰识别
+- 🎧 **回声抑制** — 硬件层 Echo Cancellation + 软件门控，防止麦克风拾取扬声器声音
+- 📄 **导出 PDF** — 一键导出完整双语对照记录
 
 ## 技术栈
 
 | 模块 | 技术 |
 |------|------|
-| 前端框架 | Next.js 16.2.7 (App Router) + React 19.2.4 |
+| 前端框架 | Next.js (App Router) + React |
 | 样式 | Tailwind CSS v4 |
-| 语言 | TypeScript 5 |
-| AI 翻译 | Anthropic Claude API (`@anthropic-ai/sdk`) · 模型: claude-opus-4-8 |
-| 语音识别 | Web Speech API (浏览器原生, 无需额外 API) |
-| 音频捕获 | `MediaDevices.getDisplayMedia` + Web Audio API |
-| 流式传输 | Server-Sent Events (SSE) via Next.js Route Handler |
+| 语言 | TypeScript |
+| AI 翻译 | Anthropic Claude API · `claude-opus-4-8` · SSE 流式输出 |
+| 语音识别 | Groq Whisper (`whisper-large-v3-turbo`) |
+| 音频采集 | `MediaDevices.getUserMedia` / `getDisplayMedia` + Web Audio API |
+| 语音合成 | Web Speech Synthesis API（浏览器原生） |
 
 ## 快速启动
 
 ### 前置条件
 
 - Node.js 20.9+
-- Chrome 或 Edge 浏览器（Web Speech API 支持）
 - Anthropic API Key
+- Groq API Key
 
 ### 安装与运行
 
 ```bash
-# 克隆仓库
 git clone <仓库地址>
 cd ai_voice
 
-# 安装依赖
 npm install
 
-# 配置 API Key（复制示例文件后填写）
-# 编辑 .env.local，填入 ANTHROPIC_API_KEY=sk-ant-...
+# 配置环境变量
+cp .env.local.example .env.local
+# 编辑 .env.local，填入两个 API Key
 
-# 启动开发服务器
 npm run dev
 ```
 
@@ -60,6 +61,7 @@ npm run dev
 
 ```env
 ANTHROPIC_API_KEY=your_anthropic_api_key_here
+GROQ_API_KEY=your_groq_api_key_here
 ```
 
 ## 项目结构
@@ -67,10 +69,12 @@ ANTHROPIC_API_KEY=your_anthropic_api_key_here
 ```
 app/
 ├── api/
+│   ├── transcribe/
+│   │   └── route.ts      # Groq Whisper 语音识别接口
 │   └── translate/
-│       └── route.ts      # Claude API 流式翻译接口 (SSE)
+│       └── route.ts      # Claude 流式翻译接口 (SSE)
 ├── components/
-│   └── interpreter.tsx   # 主界面组件 (客户端)
+│   └── interpreter.tsx   # 主界面组件
 ├── layout.tsx
 ├── page.tsx
 └── globals.css
@@ -78,32 +82,31 @@ app/
 
 ## 使用说明
 
-### 麦克风模式
-1. 选择「🎤 麦克风」
-2. 点击「▶ 开始翻译」，允许麦克风权限
-3. 用英语说话，中文字幕实时出现在屏幕下方
+1. 落地页选择输入模式（麦克风 / 系统音频）
+2. 选择源语言和目标语言
+3. 按需开启或关闭语音播报
+4. 点击「开始聆译」，允许相应权限后开始说话
+5. 字幕实时出现，开启语音播报时会自动朗读译文
+
+> **提示**：开启语音播报时建议佩戴耳机，避免扬声器声音被麦克风拾取。
 
 ### 系统音频模式
-1. 选择「🖥️ 系统音频」
-2. 点击「▶ 开始翻译」
-3. 在弹窗中选择要共享的标签页/窗口，并**勾选「共享系统音频」**
-4. 播放英语内容，系统会捕获音频并翻译
 
-> **提示**：使用 [VB-Cable](https://vb-audio.com/Cable/) 等虚拟声卡将系统音频路由至麦克风输入，可实现完全自动化的系统音频识别。
+在弹窗中选择要共享的标签页或窗口，并**勾选「共享系统音频」**，播放内容后即可自动捕获翻译。
 
-## 核心实现说明
+## 核心实现
 
-### 流式翻译 (SSE)
+### 流式翻译
 
-`/api/translate` 接收文本 + 上下文，调用 Claude 流式 API，以 Server-Sent Events 格式实时推送翻译片段至前端。前端使用 `ReadableStream` 逐块读取并更新字幕。
+`/api/translate` 调用 Claude 流式 API，以 SSE 格式实时推送翻译片段，前端逐块读取并更新字幕，句子结束时即触发 TTS 朗读，无需等待全文完成。
 
-### 滚动上下文纠错
+### 上下文纠错
 
-每次翻译请求携带最近 5 条英文原文 + 对应中文译文作为上下文。Claude 在翻译新片段的同时，若发现前序译文有误，会在输出末尾附加 `CORRECTION:N:修正内容` 格式的纠错指令，前端解析后自动更新历史字幕。
+每次翻译请求携带最近 5 条原文 + 译文作为上下文。Claude 在翻译新内容时若发现前序译文有误，会在输出末尾附加 `CORRECTION:N:修正内容`，前端解析后自动更新历史字幕。
 
-### 音频可视化
+### 回声抑制
 
-通过 `AudioContext.createAnalyser()` 获取频谱数据（FFT 128 点），采样为 40 个频率柱，以 `requestAnimationFrame` 驱动实时渲染。
+麦克风采集启用 `echoCancellation / noiseSuppression / autoGainControl`；软件层通过 `SpeechSynthesisUtterance` 的 `onstart/onend` 事件维护 TTS 状态，检测到用户说话时立刻取消播报，确保识别不被播报内容干扰。
 
 ## License
 
