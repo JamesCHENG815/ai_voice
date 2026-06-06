@@ -6,8 +6,7 @@
 
 ## Demo 视频
 
-> 🎬 **[点击观看演示视频]()**
-> *(视频上传后更新链接)*
+> 🎬 **[点击观看演示视频](https://www.bilibili.com/video/BV1EEEJ6qEWu/)**
 
 ---
 
