@@ -315,6 +315,7 @@ export default function Interpreter() {
   const targetLangRef      = useRef<LangCode>('zh-CN')
   const interimTimerRef    = useRef<ReturnType<typeof setTimeout> | null>(null)
   const lastSentTextRef    = useRef<string>('')
+  const isTtsSpeakingRef   = useRef(false)
 
   const audioLevel = bars.reduce((a, b) => a + b, 0) / bars.length
 
@@ -435,6 +436,11 @@ export default function Interpreter() {
     if (!SR) return null
     const r = new SR(); r.lang = sourceLangRef.current; r.continuous = true; r.interimResults = true
     r.onresult = (e: any) => {
+      // Stop TTS the moment the user starts speaking so recognition stays clean
+      if (isTtsSpeakingRef.current) {
+        window.speechSynthesis.cancel()
+        isTtsSpeakingRef.current = false
+      }
       let itr = ''
       for (let i = e.resultIndex; i < e.results.length; i++) {
         if (e.results[i].isFinal) {
@@ -443,10 +449,6 @@ export default function Interpreter() {
         } else {
           itr += e.results[i][0].transcript
         }
-      }
-      // Cancel TTS the moment new speech is detected so the mic stays clean
-      if (itr.trim() && window.speechSynthesis.speaking) {
-        window.speechSynthesis.cancel()
       }
       setInterim(itr)
     }
@@ -527,7 +529,7 @@ export default function Interpreter() {
         const data = await res.json()
         const text = (data.text ?? '').trim()
         const isHallucination = !text || text.length <= 1 || /^(thank you\.?|thanks\.?|you\.?|bye\.?|\.+|。+)$/i.test(text)
-        if (!isHallucination) {
+        if (!isHallucination && !isTtsSpeakingRef.current) {
           setInterim('')
           translate(text)
         } else {
@@ -559,6 +561,12 @@ export default function Interpreter() {
       const level = getAudioLevel()
       const elapsed = Date.now() - segStart
 
+      // Stop TTS as soon as voice is detected so recognition stays clean
+      if (level >= SILENCE_THRESHOLD && isTtsSpeakingRef.current) {
+        window.speechSynthesis.cancel()
+        isTtsSpeakingRef.current = false
+      }
+
       if (level < SILENCE_THRESHOLD) {
         silenceMs += 100
         if (silenceMs >= SILENCE_REQUIRED && elapsed >= MIN_DURATION) {
@@ -580,7 +588,7 @@ export default function Interpreter() {
   async function startWhisperRecording() {
     setErrMsg(''); setIsConnecting(true)
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
       whisperStreamRef.current = stream
       startAudio(stream)
       whisperActiveRef.current = true
@@ -617,7 +625,7 @@ export default function Interpreter() {
     setErrMsg(''); setIsConnecting(true)
     if (mode === 'mic') {
       try {
-        const s = await navigator.mediaDevices.getUserMedia({ audio: true })
+        const s = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } })
         startAudio(s)
         const r = makeRecog()
         if (!r) {
@@ -679,6 +687,9 @@ export default function Interpreter() {
     const voices = window.speechSynthesis.getVoices()
     const match = voices.find(v => v.lang.startsWith(lang.slice(0, 2)))
     if (match) u.voice = match
+    u.onstart = () => { isTtsSpeakingRef.current = true }
+    u.onend   = () => { setTimeout(() => { isTtsSpeakingRef.current = false }, 400) }
+    u.onerror = () => { isTtsSpeakingRef.current = false }
     window.speechSynthesis.speak(u)
   }
   speakRef.current = speak
@@ -762,6 +773,19 @@ export default function Interpreter() {
               <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: 14, letterSpacing: '0.06em' }}>
                 您忠实的 AI 同声传译助手
               </p>
+              {ttsOn && (
+                <p style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5,
+                  marginTop: 10, fontSize: 12, color: 'rgba(255,255,255,0.28)',
+                }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M3 18v-6a9 9 0 0 1 18 0v6"/>
+                    <path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3z"/>
+                    <path d="M3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/>
+                  </svg>
+                  佩戴耳机可避免回声，体验更佳
+                </p>
+              )}
             </div>
 
             {/* Mode cards */}
@@ -851,6 +875,57 @@ export default function Interpreter() {
               </select>
             </div>
 
+            {/* TTS preference toggle */}
+            <button
+              onClick={() => setTtsOn(p => !p)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 20px', borderRadius: 24,
+                cursor: 'pointer',
+                background: ttsOn
+                  ? 'linear-gradient(135deg, rgba(34,197,94,0.18), rgba(16,185,129,0.10))'
+                  : 'rgba(255,255,255,0.04)',
+                border: `1.5px solid ${ttsOn ? 'rgba(134,239,172,0.40)' : 'rgba(255,255,255,0.10)'}`,
+                color: ttsOn ? '#86efac' : 'rgba(255,255,255,0.32)',
+                boxShadow: ttsOn ? '0 0 20px rgba(34,197,94,0.15)' : 'none',
+                transition: 'all 280ms cubic-bezier(0.4,0,0.2,1)',
+                outline: 'none',
+                fontSize: 13, fontWeight: 500,
+              }}>
+              {ttsOn ? (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                  <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+                  <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+                  <line x1="23" y1="9" x2="17" y2="15"/>
+                  <line x1="17" y1="9" x2="23" y2="15"/>
+                </svg>
+              )}
+              {/* Toggle track */}
+              <span style={{
+                display: 'inline-flex', alignItems: 'center',
+                width: 36, height: 20, borderRadius: 10,
+                background: ttsOn ? 'rgba(134,239,172,0.35)' : 'rgba(255,255,255,0.08)',
+                border: `1px solid ${ttsOn ? 'rgba(134,239,172,0.50)' : 'rgba(255,255,255,0.12)'}`,
+                padding: '0 2px',
+                transition: 'all 280ms',
+                flexShrink: 0,
+              }}>
+                <span style={{
+                  width: 14, height: 14, borderRadius: '50%',
+                  background: ttsOn ? '#86efac' : 'rgba(255,255,255,0.28)',
+                  transform: ttsOn ? 'translateX(16px)' : 'translateX(0)',
+                  transition: 'transform 280ms cubic-bezier(0.4,0,0.2,1), background 280ms',
+                  flexShrink: 0,
+                }} />
+              </span>
+              <span>{ttsOn ? '翻译后自动朗读' : '仅显示文字'}</span>
+            </button>
+
             <button onClick={enterPage} disabled={!hasSR}
               className="animate-gradient-shift flex items-center justify-center gap-2.5 font-semibold text-sm transition-shadow duration-150 disabled:opacity-40 w-full"
               style={{
@@ -917,21 +992,6 @@ export default function Interpreter() {
                 <span className="md:hidden inline-block w-2 h-2 rounded-full" style={{ background: statusColor[status] }} />
               </>
             )}
-            {/* TTS toggle — icon only on mobile */}
-            <button onClick={() => { setTtsOn(p => !p); window.speechSynthesis.cancel() }}
-              className="text-xs transition-colors px-2 py-1.5 md:px-3 rounded-lg flex items-center gap-1.5"
-              style={{ color: ttsOn ? '#86efac' : 'rgba(255,255,255,0.30)', background: ttsOn ? 'rgba(34,197,94,0.12)' : 'rgba(255,255,255,0.05)', border: `1px solid ${ttsOn ? 'rgba(134,239,172,0.30)' : 'rgba(255,255,255,0.08)'}` }}>
-              {ttsOn ? (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M19.07 4.93a10 10 0 0 1 0 14.14"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
-                </svg>
-              ) : (
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/>
-                </svg>
-              )}
-              <span className="hidden md:inline">{ttsOn ? '朗读中' : '已静音'}</span>
-            </button>
             {segments.length > 0 && (
               <>
                 {/* Desktop: text button */}
@@ -1127,6 +1187,67 @@ export default function Interpreter() {
             )}
           </div>
         </div>
+      </div>
+
+      {/* Floating TTS toggle — bottom-left */}
+      <div style={{
+        position: 'fixed', bottom: micGap + (isMobile ? 4 : 8), left: micGap + (isMobile ? 4 : 8), zIndex: 50,
+        transition: 'opacity 400ms ease-out',
+        opacity: isRecording ? 1 : 0.55,
+      }}>
+        <button
+          onClick={() => { setTtsOn(p => { const next = !p; if (!next) window.speechSynthesis.cancel(); return next }) }}
+          title={ttsOn ? '点击关闭语音播报' : '点击开启语音播报'}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            padding: isMobile ? '8px 14px' : '10px 18px',
+            borderRadius: 24,
+            cursor: 'pointer',
+            backdropFilter: 'blur(16px)',
+            background: ttsOn
+              ? 'linear-gradient(135deg, rgba(34,197,94,0.22), rgba(16,185,129,0.14))'
+              : 'rgba(15,23,42,0.70)',
+            border: `1.5px solid ${ttsOn ? 'rgba(134,239,172,0.45)' : 'rgba(255,255,255,0.10)'}`,
+            color: ttsOn ? '#86efac' : 'rgba(255,255,255,0.32)',
+            boxShadow: ttsOn ? '0 4px 24px rgba(34,197,94,0.22)' : '0 2px 12px rgba(0,0,0,0.30)',
+            transition: 'all 280ms cubic-bezier(0.4,0,0.2,1)',
+            fontSize: isMobile ? 12 : 13,
+            fontWeight: 500,
+            outline: 'none',
+          }}>
+          {ttsOn ? (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <path d="M19.07 4.93a10 10 0 0 1 0 14.14"/>
+              <path d="M15.54 8.46a5 5 0 0 1 0 7.07"/>
+            </svg>
+          ) : (
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/>
+              <line x1="23" y1="9" x2="17" y2="15"/>
+              <line x1="17" y1="9" x2="23" y2="15"/>
+            </svg>
+          )}
+          {/* Toggle track */}
+          <span style={{
+            display: 'inline-flex', alignItems: 'center',
+            width: 32, height: 18, borderRadius: 9,
+            background: ttsOn ? 'rgba(134,239,172,0.35)' : 'rgba(255,255,255,0.10)',
+            border: `1px solid ${ttsOn ? 'rgba(134,239,172,0.50)' : 'rgba(255,255,255,0.15)'}`,
+            padding: '0 2px',
+            transition: 'all 280ms',
+            flexShrink: 0,
+          }}>
+            <span style={{
+              width: 12, height: 12, borderRadius: '50%',
+              background: ttsOn ? '#86efac' : 'rgba(255,255,255,0.30)',
+              transform: ttsOn ? 'translateX(14px)' : 'translateX(0)',
+              transition: 'transform 280ms cubic-bezier(0.4,0,0.2,1), background 280ms',
+              flexShrink: 0,
+            }} />
+          </span>
+          <span style={{ whiteSpace: 'nowrap' }}>{ttsOn ? '语音播报' : '播报关闭'}</span>
+        </button>
       </div>
 
       {/* Floating mic */}
