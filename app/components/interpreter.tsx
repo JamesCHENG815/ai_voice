@@ -528,8 +528,14 @@ export default function Interpreter() {
         const raw = (data.text ?? '').trim()
 
         const isHallucination = !raw || raw.length <= 1 ||
-          /^(thank you\.?|thanks\.?|you\.?|bye\.?|\.+|。+)$/i.test(raw)
-        if (isHallucination || isTtsSpeakingRef.current) return
+          /^(thank you\.?|thanks\.?|you\.?|bye\.?|\.+|。+)$/i.test(raw) ||
+          /点赞|订阅|转发|打赏|明镜|字幕|支持.*栏目|感谢.*收看|感谢.*观看|请.*关注/.test(raw)
+        if (isHallucination) {
+          // Reset prompt context so the hallucination doesn't seed the next chunk
+          whisperPromptRef.current = ''
+          return
+        }
+        if (isTtsSpeakingRef.current) return
 
         whisperPromptRef.current = raw  // keep for next chunk's context
 
