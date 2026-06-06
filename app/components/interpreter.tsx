@@ -297,6 +297,7 @@ export default function Interpreter() {
   const [bars, setBars]               = useState<number[]>(new Array(BAR_COUNT).fill(0))
   const [hasSR, setHasSR]             = useState(true)
   const [ttsOn, setTtsOn]             = useState(true)
+  const [copiedId, setCopiedId]       = useState<string | null>(null)
 
   const recogRef          = useRef<any>(null)
   const audioCtxRef       = useRef<AudioContext | null>(null)
@@ -1121,8 +1122,14 @@ export default function Interpreter() {
                           padding: '9px 16px',
                           maxWidth: isMobile ? '100%' : '90%',
                           boxShadow: '0 2px 16px rgba(79,70,229,0.18)',
+                          display: 'flex', alignItems: 'flex-start', gap: 8,
                         }}>
-                          <p style={{ fontSize: isMobile ? 15 : 17, color: '#e0e7ff', lineHeight: 1.5 }}>{seg.chinese}</p>
+                          <p style={{ fontSize: isMobile ? 15 : 17, color: '#e0e7ff', lineHeight: 1.5, flex: 1 }}>{seg.chinese}</p>
+                          <button onClick={() => { navigator.clipboard.writeText(seg.chinese); setCopiedId(seg.id); setTimeout(() => setCopiedId(null), 1500) }}
+                            title="复制译文"
+                            style={{ flexShrink: 0, marginTop: 2, padding: '2px 4px', background: 'none', border: 'none', cursor: 'pointer', color: copiedId === seg.id ? '#86efac' : 'rgba(255,255,255,0.35)', transition: 'color 0.2s' }}>
+                            {copiedId === seg.id ? '✓' : '⎘'}
+                          </button>
                         </div>
                       )}
                     </div>
@@ -1160,12 +1167,14 @@ export default function Interpreter() {
                         : '0 2px 16px rgba(79,70,229,0.22)',
                       minHeight: 46,
                       transition: 'background 0.3s, box-shadow 0.3s',
+                      display: 'flex', alignItems: 'flex-start', gap: 10,
                     }}>
                       <p className="font-medium" style={{
                         fontSize: 'clamp(18px, 2.4vw, 26px)',
                         lineHeight: 1.45,
                         color: latest.isStreaming ? '#bfdbfe' : '#e0e7ff',
                         transition: 'color 0.3s',
+                        flex: 1,
                       }}>
                         {latest.chinese || (latest.isStreaming ? '' : '')}
                         {latest.isStreaming && (
@@ -1173,6 +1182,13 @@ export default function Interpreter() {
                             style={{ width: 2, height: '0.85em', background: '#93c5fd', borderRadius: 1 }} />
                         )}
                       </p>
+                      {!latest.isStreaming && latest.chinese && (
+                        <button onClick={() => { navigator.clipboard.writeText(latest.chinese); setCopiedId(latest.id); setTimeout(() => setCopiedId(null), 1500) }}
+                          title="复制译文"
+                          style={{ flexShrink: 0, marginTop: 4, padding: '2px 4px', background: 'none', border: 'none', cursor: 'pointer', color: copiedId === latest.id ? '#86efac' : 'rgba(255,255,255,0.35)', transition: 'color 0.2s', fontSize: 16 }}>
+                          {copiedId === latest.id ? '✓' : '⎘'}
+                        </button>
+                      )}
                     </div>
                   </div>
                 )}
