@@ -733,7 +733,7 @@ export default function Interpreter() {
     idle: '', listening: '监听中…', processing: '翻译中…', error: errMsg,
   }
 
-  const useWhisper = isMobile || !hasSR
+  const useWhisper = true
   const micSize = isMobile ? 140 : CONTAINER_SIZE
   const micGap  = isMobile ? 12  : CORNER_GAP
   const half    = micSize / 2
