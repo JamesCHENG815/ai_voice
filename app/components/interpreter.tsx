@@ -1189,11 +1189,19 @@ export default function Interpreter() {
         </div>
       </div>
 
-      {/* Floating TTS toggle — bottom-left */}
+      {/* Floating TTS toggle — above the mic, same width so it centers perfectly */}
       <div style={{
-        position: 'fixed', bottom: micGap + (isMobile ? 4 : 8), left: micGap + (isMobile ? 4 : 8), zIndex: 50,
-        transition: 'opacity 400ms ease-out',
-        opacity: isRecording ? 1 : 0.55,
+        position: 'fixed',
+        bottom: micSize + micGap + 8,
+        right: micGap,
+        width: micSize,
+        zIndex: 50,
+        display: 'flex',
+        justifyContent: 'center',
+        transition: 'opacity 550ms cubic-bezier(0.4,0,0.2,1), transform 550ms cubic-bezier(0.4,0,0.2,1)',
+        opacity: isRecording ? 1 : 0,
+        transform: isRecording ? 'translateY(0)' : 'translateY(10px)',
+        pointerEvents: isRecording ? 'auto' : 'none',
       }}>
         <button
           onClick={() => { setTtsOn(p => { const next = !p; if (!next) window.speechSynthesis.cancel(); return next }) }}
@@ -1214,6 +1222,7 @@ export default function Interpreter() {
             fontSize: isMobile ? 12 : 13,
             fontWeight: 500,
             outline: 'none',
+            whiteSpace: 'nowrap',
           }}>
           {ttsOn ? (
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
@@ -1228,7 +1237,6 @@ export default function Interpreter() {
               <line x1="17" y1="9" x2="23" y2="15"/>
             </svg>
           )}
-          {/* Toggle track */}
           <span style={{
             display: 'inline-flex', alignItems: 'center',
             width: 32, height: 18, borderRadius: 9,
@@ -1246,7 +1254,7 @@ export default function Interpreter() {
               flexShrink: 0,
             }} />
           </span>
-          <span style={{ whiteSpace: 'nowrap' }}>{ttsOn ? '语音播报' : '播报关闭'}</span>
+          <span>{ttsOn ? '语音播报' : '播报关闭'}</span>
         </button>
       </div>
 
